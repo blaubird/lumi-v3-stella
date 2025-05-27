@@ -6,3 +6,4 @@ httpx>=0.24.0
 openai>=1.0.0
 python-dotenv>=1.0.0
 prometheus-client>=0.17.0
+psycopg2-binary>=2.9.5  # PostgreSQL driver
