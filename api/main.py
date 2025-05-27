@@ -7,6 +7,7 @@ import httpx
 from openai import AsyncOpenAI
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
+from contextlib import asynccontextmanager
 
 # Changed to absolute imports as main.py is the entry point
 from deps import get_db, tenant_by_phone_id 
@@ -31,24 +32,12 @@ if os.getenv("VERIFY_TOKEN"):
 # Initialize OpenAI client
 ai = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-app = FastAPI(
-    title="Luminiteq WhatsApp Integration API",
-    description="Handles WhatsApp webhooks, processes messages using AI, provides admin functionalities, and RAG capabilities.",
-    version="1.3.0"
-)
-
 # Setup structured logging
-logger = setup_logging(app)("main")
+logger = setup_logging(None)("main")
 
-# Setup monitoring
-setup_monitoring(app)
-
-# Include the admin and RAG routers
-app.include_router(admin_router.router)
-app.include_router(rag_router.router)
-
-@app.on_event("startup")
-def startup_event():
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup
     logger.info("Application startup: running Alembic migrations.")
     try:
         # Ensure alembic.ini path is correct relative to this file's location
@@ -61,6 +50,25 @@ def startup_event():
     
     # Record startup time for metrics
     app.state.start_time = time.time()
+    
+    yield
+    
+    # Shutdown
+    logger.info("Application shutdown.")
+
+app = FastAPI(
+    title="Luminiteq WhatsApp Integration API",
+    description="Handles WhatsApp webhooks, processes messages using AI, provides admin functionalities, and RAG capabilities.",
+    version="1.3.0",
+    lifespan=lifespan
+)
+
+# Setup monitoring
+setup_monitoring(app)
+
+# Include the admin and RAG routers
+app.include_router(admin_router.router)
+app.include_router(rag_router.router)
 
 # Health Check Endpoint
 @app.get("/health", tags=["Monitoring"], summary="Perform a Health Check")
@@ -265,6 +273,7 @@ async def send_whatsapp_message(phone_id: str, token: str, recipient: str, messa
 
 if __name__ == "__main__":
     import hypercorn
+    from hypercorn.asyncio import serve
     from hypercorn.config import Config as HyperConfig
     
     config = HyperConfig()
@@ -272,4 +281,4 @@ if __name__ == "__main__":
     config.use_reloader = True
     
     import asyncio
-    asyncio.run(hypercorn.asyncio.serve(app, config))
+    asyncio.run(serve(app, config))
