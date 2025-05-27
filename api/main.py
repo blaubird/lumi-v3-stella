@@ -1,6 +1,3 @@
-from dotenv import load_dotenv
-load_dotenv()  # Load environment variables from .env file at the very beginning
-
 import os
 import time
 from fastapi import FastAPI, Depends, Request, HTTPException, Query, Response
@@ -171,9 +168,8 @@ async def webhook_handler(
                     {"role": "system", "content": tenant.system_prompt}
                 ] + [{"role": m.role, "content": m.text} for m in history_messages]
 
-                # Process AI reply asynchronously
-                from tasks import process_ai_reply
-                task = process_ai_reply.delay(
+                # Process AI reply directly (Celery removed)
+                await process_ai_reply(
                     tenant_id=tenant.id,
                     tenant_phone_id=tenant.phone_id,
                     tenant_wh_token=tenant.wh_token,
@@ -182,11 +178,98 @@ async def webhook_handler(
                     sender_phone=sender_phone,
                     message_id=db_message.id
                 )
-                logger.info("Added AI reply task to queue", extra={
+                logger.info("Processed AI reply", extra={
                     "wa_msg_id": whatsapp_msg_id,
                     "tenant_id": tenant.id,
-                    "message_id": db_message.id,
-                    "task_id": task.id
+                    "message_id": db_message.id
                 })
 
     return {"status": "received", "message": "Webhook processed successfully."}
+
+async def process_ai_reply(
+    tenant_id: int,
+    tenant_phone_id: str,
+    tenant_wh_token: str,
+    tenant_system_prompt: str,
+    chat_context: list,
+    sender_phone: str,
+    message_id: int
+):
+    """
+    Process AI reply directly
+    """
+    try:
+        # Get AI response
+        response = await ai.chat.completions.create(
+            model="gpt-4",
+            messages=chat_context,
+            temperature=0.7,
+            max_tokens=500
+        )
+        ai_reply = response.choices[0].message.content
+        
+        # Save AI reply to database
+        db = next(get_db())
+        try:
+            db_message = Message(
+                tenant_id=tenant_id,
+                role="assistant",
+                text=ai_reply
+            )
+            db.add(db_message)
+            db.commit()
+            db.refresh(db_message)
+        except Exception as e:
+            db.rollback()
+            logger.error("Error saving AI reply to database", exc_info=e)
+        finally:
+            db.close()
+        
+        # Send reply to WhatsApp
+        await send_whatsapp_message(
+            phone_id=tenant_phone_id,
+            token=tenant_wh_token,
+            recipient=sender_phone,
+            message=ai_reply
+        )
+        
+        return {"status": "success", "message_id": message_id}
+    except Exception as e:
+        logger.error("Error in process_ai_reply", exc_info=e)
+        return {"status": "error", "error": str(e)}
+
+async def send_whatsapp_message(phone_id: str, token: str, recipient: str, message: str):
+    """
+    Send WhatsApp message
+    """
+    try:
+        url = f"https://graph.facebook.com/v17.0/{phone_id}/messages"
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json"
+        }
+        payload = {
+            "messaging_product": "whatsapp",
+            "to": recipient,
+            "type": "text",
+            "text": {"body": message}
+        }
+        
+        async with httpx.AsyncClient() as client:
+            response = await client.post(url, headers=headers, json=payload)
+            response.raise_for_status()
+            return response.json()
+    except Exception as e:
+        logger.error("Error sending WhatsApp message", exc_info=e)
+        return {"error": str(e)}
+
+if __name__ == "__main__":
+    import hypercorn
+    from hypercorn.config import Config as HyperConfig
+    
+    config = HyperConfig()
+    config.bind = [f"0.0.0.0:{int(os.getenv('PORT', '8000'))}"]
+    config.use_reloader = True
+    
+    import asyncio
+    asyncio.run(hypercorn.asyncio.serve(app, config))
