@@ -1,82 +1,54 @@
-from prometheus_client import Counter, Histogram, CollectorRegistry, generate_latest, CONTENT_TYPE_LATEST
-from typing import Optional
+from prometheus_client import Counter, Histogram, CollectorRegistry
+from fastapi import FastAPI
 
 # Create a private registry
 registry = CollectorRegistry()
 
 # Create metrics
-http_requests_total = Counter(
+REQUEST_COUNT = Counter(
     'http_requests_total',
     'Total count of HTTP requests',
-    ['method', 'path'],
+    ['method', 'endpoint'],
     registry=registry
 )
 
-http_request_duration_seconds = Histogram(
-    'http_request_duration_seconds',
+REQUEST_LATENCY = Histogram(
+    'http_request_latency_seconds',
     'HTTP request latency in seconds',
-    ['method', 'path'],
+    ['method', 'endpoint'],
     registry=registry
 )
 
-def get_metrics() -> tuple[str, str]:
+def setup_metrics(app: FastAPI):
     """
-    Returns the metrics in Prometheus format
-    
-    Returns:
-        tuple: (metrics_content, content_type)
-    """
-    return generate_latest(registry).decode('utf-8'), CONTENT_TYPE_LATEST
-
-def setup_monitoring(app):
-    """
-    Setup monitoring for FastAPI application
+    Setup metrics for FastAPI application
     
     Args:
         app: FastAPI application instance
     """
-    from fastapi import Request
-    from starlette.middleware.base import BaseHTTPMiddleware
-    import time
+    from prometheus_fastapi_instrumentator import Instrumentator
     
-    class PrometheusMiddleware(BaseHTTPMiddleware):
-        async def dispatch(self, request: Request, call_next):
-            method = request.method
-            path = request.url.path
-            
-            # Skip metrics endpoint itself
-            if path == "/metrics":
-                return await call_next(request)
-            
-            start_time = time.time()
-            
-            # Process request
-            response = await call_next(request)
-            
-            # Record metrics
-            duration = time.time() - start_time
-            http_requests_total.labels(method=method, path=path).inc()
-            http_request_duration_seconds.labels(method=method, path=path).observe(duration)
-            
-            return response
+    # Create instrumentator
+    instrumentator = Instrumentator(
+        should_group_status_codes=True,
+        should_ignore_untemplated=True,
+        should_respect_env_var=True,
+        should_instrument_requests_inprogress=True,
+        excluded_handlers=[".*admin.*", "/metrics"],
+        env_var_name="ENABLE_METRICS",
+        inprogress_name="inprogress",
+        inprogress_labels=True,
+    )
     
-    # Add middleware
-    app.add_middleware(PrometheusMiddleware)
+    # Add custom metrics
+    instrumentator.add(
+        metrics_namespace="api",
+        metrics_subsystem="",
+        latency_target=REQUEST_LATENCY,
+        counter_target=REQUEST_COUNT,
+    )
     
-    # Add metrics endpoint
-    from fastapi import APIRouter
-    
-    metrics_router = APIRouter()
-    
-    @metrics_router.get("/metrics", include_in_schema=False)
-    async def metrics():
-        metrics_data, content_type = get_metrics()
-        return Response(content=metrics_data, media_type=content_type)
-    
-    # Import Response here to avoid circular imports
-    from fastapi.responses import Response
-    
-    # Include router
-    app.include_router(metrics_router)
+    # Instrument app
+    instrumentator.instrument(app).expose(app, include_in_schema=False)
     
     return app
