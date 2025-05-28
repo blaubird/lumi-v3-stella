@@ -1,7 +1,18 @@
 from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Text, Enum, TIMESTAMP
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
-from pgvector.sqlalchemy import Vector
+# Conditionally import Vector to handle environments without pgvector
+try:
+    from pgvector.sqlalchemy import Vector
+    has_pgvector = True
+except ImportError:
+    has_pgvector = False
+    # Create a placeholder for Vector that won't break imports
+    class VectorPlaceholder:
+        def __call__(self, *args, **kwargs):
+            raise ImportError("pgvector is not installed. Please install it with 'pip install pgvector'")
+    Vector = VectorPlaceholder()
+
 from db import Base
 
 class Tenant(Base):
@@ -39,7 +50,11 @@ class FAQ(Base):
     tenant_id = Column(String, ForeignKey("tenants.id"), nullable=False, index=True)
     question = Column(Text, nullable=False)
     answer = Column(Text, nullable=False)
-    embedding = Column(Vector(1536), nullable=True)
+    # Only define embedding column if pgvector is available
+    if has_pgvector:
+        embedding = Column(Vector(1536), nullable=True)
+    else:
+        embedding = Column(Text, nullable=True)  # Fallback to Text type
     created_at = Column(TIMESTAMP, nullable=False, server_default=func.now())
     updated_at = Column(TIMESTAMP, nullable=False, server_default=func.now(), onupdate=func.now())
     
