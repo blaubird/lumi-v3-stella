@@ -10,6 +10,12 @@ from models import Tenant, Message
 from routers import admin
 from tasks import process_ai_reply
 from monitoring import setup_metrics
+from logging_utils import setup_logging
+
+# Setup logging first
+logger = setup_logging()
+# Get a logger for this module
+log = logger("main")
 
 # Create FastAPI app
 app = FastAPI(
@@ -19,8 +25,15 @@ app = FastAPI(
     docs_url=None
 )
 
+# Setup logging middleware and exception handlers
+setup_logging(app)
+
+# Log application startup
+log.info("Application starting up")
+
 # Setup metrics
 setup_metrics(app)
+log.info("Metrics setup complete")
 
 # Add CORS middleware
 app.add_middleware(
@@ -30,12 +43,15 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+log.info("CORS middleware added")
 
 # Include routers
 app.include_router(admin.router)
+log.info("Routers registered")
 
 @app.get("/docs", include_in_schema=False)
 async def custom_swagger_ui_html():
+    log.info("Swagger UI requested")
     return get_swagger_ui_html(
         openapi_url=app.openapi_url,
         title=app.title + " - Swagger UI",
@@ -47,6 +63,7 @@ async def custom_swagger_ui_html():
 @app.get("/health")
 async def health_check():
     """Health check endpoint"""
+    log.info("Health check requested")
     return {"status": "ok"}
 
 @app.post("/webhook")
@@ -54,10 +71,12 @@ async def webhook(request: Request, background_tasks: BackgroundTasks, db: Sessi
     """
     WhatsApp webhook endpoint
     """
+    log.info("Webhook request received")
     body = await request.json()
     
     # Process webhook
     if "object" in body and body["object"] == "whatsapp_business_account":
+        log.info("Processing WhatsApp webhook", extra={"account_id": body.get("id")})
         for entry in body.get("entry", []):
             for change in entry.get("changes", []):
                 if change.get("field") == "messages":
@@ -71,9 +90,19 @@ async def webhook(request: Request, background_tasks: BackgroundTasks, db: Sessi
                             sender_phone = message.get("from")
                             text_content = message.get("text", {}).get("body", "")
                             
+                            log.info(
+                                "Processing text message", 
+                                extra={
+                                    "msg_id": whatsapp_msg_id,
+                                    "sender": sender_phone,
+                                    "content_length": len(text_content)
+                                }
+                            )
+                            
                             # Find tenant by phone ID
                             tenant = db.query(Tenant).filter(Tenant.phone_id == value.get("metadata", {}).get("phone_number_id")).first()
                             if not tenant:
+                                log.warning("Tenant not found for phone ID", extra={"phone_id": value.get("metadata", {}).get("phone_number_id")})
                                 continue
                             
                             # Save message
@@ -87,8 +116,10 @@ async def webhook(request: Request, background_tasks: BackgroundTasks, db: Sessi
                                 db.add(db_message)
                                 db.commit()
                                 db.refresh(db_message)
+                                log.info("Message saved to database", extra={"db_id": db_message.id})
                                 
                                 # Process AI reply in background
+                                log.info("Scheduling AI reply processing")
                                 background_tasks.add_task(
                                     process_ai_reply,
                                     tenant_id=tenant.id,
@@ -96,12 +127,16 @@ async def webhook(request: Request, background_tasks: BackgroundTasks, db: Sessi
                                     text=text_content
                                 )
                                 
-                            except IntegrityError:
+                            except IntegrityError as e:
+                                log.error("Database integrity error", exc_info=e)
                                 db.rollback()
                                 continue
-                            except Exception:
+                            except Exception as e:
+                                log.error("Unexpected error processing message", exc_info=e)
                                 db.rollback()
                                 continue
+    else:
+        log.warning("Received non-WhatsApp webhook", extra={"object_type": body.get("object")})
     
     return {"status": "received"}
 
@@ -113,6 +148,13 @@ if __name__ == "__main__":
     config = Config()
     config.bind = [f"0.0.0.0:{int(os.getenv('PORT', '8080'))}"]
     config.use_reloader = True
+    
+    # Configure Hypercorn logging
+    config.accesslog = "-"  # Output access logs to stdout
+    config.errorlog = "-"   # Output error logs to stdout
+    config.loglevel = "INFO"
+    
+    log.info(f"Starting Hypercorn server on {config.bind}")
     
     # Run app with Hypercorn
     import asyncio
