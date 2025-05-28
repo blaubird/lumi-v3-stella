@@ -2,11 +2,9 @@ from fastapi import APIRouter, Depends, HTTPException, Body
 from sqlalchemy.orm import Session
 from typing import List, Optional
 import os
-
 from db import get_db
-from models import Tenant, FAQ
-from schemas.admin import TenantCreate, TenantResponse, TenantUpdate
-from schemas.rag import FAQCreate, FAQResponse
+from models import Tenant, FAQ, Message
+from schemas.admin import TenantCreate, TenantResponse, FAQCreate, FAQResponse, MessageResponse
 
 router = APIRouter(prefix="/admin", tags=["Admin"])
 
@@ -44,7 +42,7 @@ def get_tenant(tenant_id: str, db: Session = Depends(get_db)):
     return tenant
 
 @router.put("/tenants/{tenant_id}", response_model=TenantResponse)
-def update_tenant(tenant_id: str, tenant_update: TenantUpdate, db: Session = Depends(get_db)):
+def update_tenant(tenant_id: str, tenant_update: TenantCreate, db: Session = Depends(get_db)):
     """Update tenant"""
     db_tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
     if not db_tenant:
@@ -97,8 +95,14 @@ def create_faq(tenant_id: str, faq: FAQCreate, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(db_faq)
     
-    # Generate embedding asynchronously
-    # This would typically be done in a background task
-    # For now, we'll just return the FAQ without embedding
-    
     return db_faq
+
+@router.get("/tenants/{tenant_id}/messages", response_model=List[MessageResponse])
+def get_tenant_messages(tenant_id: str, db: Session = Depends(get_db)):
+    """Get all messages for a tenant"""
+    tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+    
+    messages = db.query(Message).filter(Message.tenant_id == tenant_id).all()
+    return messages
