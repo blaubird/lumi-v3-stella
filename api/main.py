@@ -1,9 +1,9 @@
-import os
 from fastapi import FastAPI, Request, Depends, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.docs import get_swagger_ui_html
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
+import os
 
 from db import get_db, engine, Base
 from models import Tenant, Message
@@ -106,12 +106,14 @@ async def webhook(request: Request, background_tasks: BackgroundTasks, db: Sessi
     return {"status": "received"}
 
 if __name__ == "__main__":
-    import uvicorn
+    import hypercorn.asyncio
+    from hypercorn.config import Config
     
-    # Run app
-    uvicorn.run(
-        "main:app",
-        host="0.0.0.0",
-        port=int(os.getenv("PORT", "8080")),
-        reload=True
-    )
+    # Configure Hypercorn
+    config = Config()
+    config.bind = [f"0.0.0.0:{int(os.getenv('PORT', '8080'))}"]
+    config.use_reloader = True
+    
+    # Run app with Hypercorn
+    import asyncio
+    asyncio.run(hypercorn.asyncio.serve(app, config))
