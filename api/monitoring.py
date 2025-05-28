@@ -52,3 +52,4 @@ def setup_metrics(app: FastAPI):
     instrumentator.instrument(app).expose(app, include_in_schema=False)
     
     return app
+
