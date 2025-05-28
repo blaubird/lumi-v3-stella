@@ -16,7 +16,7 @@ from routers import admin as admin_router
 from routers import rag as rag_router
 
 # Import logging and monitoring utilities
-from logging_utils import setup_logging, get_logger
+from logging_utils import configure_basic_logging, setup_logging
 from monitoring_utils import setup_monitoring, track_openai_call
 
 # Environment Variable Sanitization
@@ -32,8 +32,8 @@ if os.getenv("VERIFY_TOKEN"):
 # Initialize OpenAI client
 ai = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-# Setup structured logging
-logger = setup_logging(None)("main")
+# Initialize logger before FastAPI app creation
+logger = configure_basic_logging()("main")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -62,6 +62,9 @@ app = FastAPI(
     version="1.3.0",
     lifespan=lifespan
 )
+
+# Setup logging middleware and exception handlers after app creation
+setup_logging(app)
 
 # Setup monitoring
 setup_monitoring(app)
