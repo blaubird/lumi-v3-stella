@@ -27,6 +27,7 @@ def setup_metrics(app: FastAPI):
         app: FastAPI application instance
     """
     from prometheus_fastapi_instrumentator import Instrumentator
+    from prometheus_fastapi_instrumentator.metrics import requests, latency
     
     # Create instrumentator
     instrumentator = Instrumentator(
@@ -40,16 +41,11 @@ def setup_metrics(app: FastAPI):
         inprogress_labels=True,
     )
     
-    # Add custom metrics
-    instrumentator.add(
-        metrics_namespace="api",
-        metrics_subsystem="",
-        latency_target=REQUEST_LATENCY,
-        counter_target=REQUEST_COUNT,
-    )
+    # Add custom metrics using the supported method
+    instrumentator.add(requests())
+    instrumentator.add(latency())
     
     # Instrument app
     instrumentator.instrument(app).expose(app, include_in_schema=False)
     
     return app
-
