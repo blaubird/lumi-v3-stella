@@ -7,7 +7,6 @@ class Tenant(Base):
     __tablename__ = "tenants"
     
     id = Column(Integer, primary_key=True, index=True)
-    name = Column(String(255), nullable=False)
     phone_id = Column(String(255), nullable=False, unique=True)
     wh_token = Column(String(255), nullable=False)
     system_prompt = Column(Text, nullable=False)
