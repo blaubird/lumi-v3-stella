@@ -4,10 +4,11 @@ services:
   app:
     build: .
     ports:
-      - "8080:8080"
+      - "${PORT}:${PORT}"
     volumes:
       - ./api:/app/api
     environment:
+      - PORT=${PORT}
       - DATABASE_URL=${DATABASE_URL}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - VERIFY_TOKEN=${VERIFY_TOKEN}
@@ -42,6 +43,7 @@ services:
     volumes:
       - ./api:/app/api
     environment:
+      - PORT=${PORT}
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/0
       - DATABASE_URL=${DATABASE_URL}
