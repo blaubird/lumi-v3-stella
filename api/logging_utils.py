@@ -157,17 +157,8 @@ class GlobalExceptionHandler:
                 }
             )
 
-def setup_logging(app: FastAPI):
-    """
-    Setup logging and exception handling
-    """
-    # Add middleware for request context
-    app.add_middleware(RequestContextMiddleware)
-    
-    # Add global exception handler
-    GlobalExceptionHandler(app)
-    
-    # Configure basic logging
+def configure_basic_logging():
+    """Configure basic logging without FastAPI app dependencies"""
     logging.basicConfig(
         level=logging.INFO,
         format='%(message)s',  # Use simple format as StructuredLogger does formatting
@@ -175,6 +166,30 @@ def setup_logging(app: FastAPI):
             logging.StreamHandler(),  # Console output
         ]
     )
+    return get_logger
+
+def setup_logging(app: Optional[FastAPI] = None):
+    """
+    Setup logging and exception handling
+    
+    If app is None, only returns the logger factory without setting up middleware
+    """
+    # Configure basic logging in any case
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(message)s',  # Use simple format as StructuredLogger does formatting
+        handlers=[
+            logging.StreamHandler(),  # Console output
+        ]
+    )
+    
+    # Only add middleware and exception handler if app is provided
+    if app is not None:
+        # Add middleware for request context
+        app.add_middleware(RequestContextMiddleware)
+        
+        # Add global exception handler
+        GlobalExceptionHandler(app)
     
     # Return factory function for creating loggers
     return get_logger
