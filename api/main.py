@@ -17,7 +17,7 @@ from routers import rag as rag_router
 
 # Import logging and monitoring utilities
 from logging_utils import configure_basic_logging, setup_logging
-from monitoring_utils import setup_monitoring, track_openai_call
+from monitoring import setup_monitoring
 
 # Environment Variable Sanitization
 if os.getenv("OPENAI_API_KEY"):
@@ -66,7 +66,7 @@ app = FastAPI(
 # Setup logging middleware and exception handlers after app creation
 setup_logging(app)
 
-# Setup monitoring
+# Setup Prometheus monitoring
 setup_monitoring(app)
 
 # Include the admin and RAG routers
