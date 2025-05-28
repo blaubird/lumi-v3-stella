@@ -26,7 +26,6 @@ def create_tenant(tenant: TenantCreate, db: Session = Depends(get_db)):
     
     # Create new tenant
     db_tenant = Tenant(
-        name=tenant.name,
         phone_id=tenant.phone_id,
         wh_token=tenant.wh_token,
         system_prompt=tenant.system_prompt
@@ -37,7 +36,7 @@ def create_tenant(tenant: TenantCreate, db: Session = Depends(get_db)):
     return db_tenant
 
 @router.get("/tenants/{tenant_id}", response_model=TenantResponse)
-def get_tenant(tenant_id: int, db: Session = Depends(get_db)):
+def get_tenant(tenant_id: str, db: Session = Depends(get_db)):
     """Get tenant by ID"""
     tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
     if not tenant:
@@ -45,7 +44,7 @@ def get_tenant(tenant_id: int, db: Session = Depends(get_db)):
     return tenant
 
 @router.put("/tenants/{tenant_id}", response_model=TenantResponse)
-def update_tenant(tenant_id: int, tenant_update: TenantUpdate, db: Session = Depends(get_db)):
+def update_tenant(tenant_id: str, tenant_update: TenantUpdate, db: Session = Depends(get_db)):
     """Update tenant"""
     db_tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
     if not db_tenant:
@@ -60,7 +59,7 @@ def update_tenant(tenant_id: int, tenant_update: TenantUpdate, db: Session = Dep
     return db_tenant
 
 @router.delete("/tenants/{tenant_id}")
-def delete_tenant(tenant_id: int, db: Session = Depends(get_db)):
+def delete_tenant(tenant_id: str, db: Session = Depends(get_db)):
     """Delete tenant"""
     db_tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
     if not db_tenant:
@@ -72,7 +71,7 @@ def delete_tenant(tenant_id: int, db: Session = Depends(get_db)):
 
 # FAQ endpoints
 @router.get("/tenants/{tenant_id}/faqs", response_model=List[FAQResponse])
-def get_tenant_faqs(tenant_id: int, db: Session = Depends(get_db)):
+def get_tenant_faqs(tenant_id: str, db: Session = Depends(get_db)):
     """Get all FAQs for a tenant"""
     tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
     if not tenant:
@@ -82,7 +81,7 @@ def get_tenant_faqs(tenant_id: int, db: Session = Depends(get_db)):
     return faqs
 
 @router.post("/tenants/{tenant_id}/faqs", response_model=FAQResponse)
-def create_faq(tenant_id: int, faq: FAQCreate, db: Session = Depends(get_db)):
+def create_faq(tenant_id: str, faq: FAQCreate, db: Session = Depends(get_db)):
     """Create a new FAQ for a tenant"""
     tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
     if not tenant:
