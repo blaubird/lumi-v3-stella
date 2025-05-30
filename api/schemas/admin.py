@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, List
 from datetime import datetime
 
 class TenantBase(BaseModel):
@@ -53,3 +53,31 @@ class MessageResponse(MessageBase):
     
     class Config:
         from_attributes = True
+
+class UsageResponse(BaseModel):
+    id: int
+    tenant_id: str
+    direction: str
+    tokens: int
+    msg_ts: datetime
+    
+    class Config:
+        from_attributes = True
+
+class UsageStatsResponse(BaseModel):
+    items: List[UsageResponse]
+    total_inbound_tokens: int
+    total_outbound_tokens: int
+
+class BulkFAQItem(BaseModel):
+    question: str
+    answer: str
+
+class BulkFAQImportRequest(BaseModel):
+    items: List[BulkFAQItem]
+
+class BulkFAQImportResponse(BaseModel):
+    total_items: int
+    successful_items: int
+    failed_items: int
+    errors: Optional[List[str]] = None
