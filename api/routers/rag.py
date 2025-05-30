@@ -1,11 +1,9 @@
-from fastapi import APIRouter, Depends, HTTPException, Body
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from typing import List, Optional
-import json
-
 from db import get_db
-from models import Tenant, FAQ
-from schemas.rag import FAQResponse, QueryRequest, QueryResponse
+from models import Tenant
+from schemas.rag import QueryRequest, QueryResponse
+from ai import get_rag_response
 
 router = APIRouter(prefix="/rag", tags=["RAG"])
 
@@ -22,13 +20,12 @@ async def query_rag(
     if not tenant:
         raise HTTPException(status_code=404, detail="Tenant not found")
     
-    # In a real implementation, we would:
-    # 1. Generate embedding for the query
-    # 2. Find similar FAQs using vector search
-    # 3. Return the most relevant answer
+    # Use the RAG implementation to get a response
+    response = await get_rag_response(
+        db=db,
+        tenant_id=query.tenant_id,
+        user_query=query.query,
+        system_prompt=tenant.system_prompt
+    )
     
-    # For now, we'll just return a simple response
-    return {
-        "answer": "This is a placeholder answer. In a real implementation, this would be generated based on relevant FAQs.",
-        "sources": []
-    }
+    return response
