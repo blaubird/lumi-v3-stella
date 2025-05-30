@@ -1,11 +1,15 @@
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Query
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 from typing import List
-
 from db import get_db
-from models import Tenant, FAQ
-from schemas.admin import TenantCreate, TenantResponse, TenantUpdate, FAQCreate, FAQResponse
-from schemas.bulk_import import BulkFAQImportRequest, BulkFAQImportResponse
+from models import Tenant, Message, FAQ, Usage
+from schemas.admin import (
+    TenantCreate, TenantUpdate, TenantResponse, 
+    FAQCreate, FAQResponse, MessageResponse,
+    BulkFAQImportRequest, BulkFAQImportResponse,
+    UsageStatsResponse
+)
 from deps import verify_admin_token
 from ai import generate_embedding
 from logging_utils import get_logger
@@ -15,25 +19,29 @@ logger = get_logger(__name__)
 
 router = APIRouter(prefix="/admin", tags=["Admin"])
 
-# === Tenant Management ===
 @router.get("/tenants", response_model=List[TenantResponse], dependencies=[Depends(verify_admin_token)])
-def get_tenants(db: Session = Depends(get_db)):
+async def get_tenants(db: Session = Depends(get_db)):
     """Get all tenants"""
     tenants = db.query(Tenant).all()
     logger.info("Retrieved all tenants", extra={"count": len(tenants)})
     return tenants
 
 @router.post("/tenants", response_model=TenantResponse, dependencies=[Depends(verify_admin_token)])
-def create_tenant(tenant: TenantCreate, db: Session = Depends(get_db)):
+async def create_tenant(tenant: TenantCreate, db: Session = Depends(get_db)):
     """Create a new tenant"""
-    # Check if tenant with same phone_id already exists
+    # Check if phone_id already exists
     existing = db.query(Tenant).filter(Tenant.phone_id == tenant.phone_id).first()
     if existing:
-        logger.warning("Tenant with phone_id already exists", extra={"phone_id": tenant.phone_id})
-        raise HTTPException(status_code=400, detail="Tenant with this phone_id already exists")
+        logger.warning("Tenant creation failed: phone_id already exists", extra={"phone_id": tenant.phone_id})
+        raise HTTPException(status_code=400, detail="Phone ID already exists")
+    
+    # Generate a unique ID for the tenant
+    import uuid
+    tenant_id = str(uuid.uuid4())
     
     # Create new tenant
     db_tenant = Tenant(
+        id=tenant_id,
         phone_id=tenant.phone_id,
         wh_token=tenant.wh_token,
         system_prompt=tenant.system_prompt
@@ -42,66 +50,97 @@ def create_tenant(tenant: TenantCreate, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(db_tenant)
     
-    logger.info("Tenant created", extra={"tenant_id": db_tenant.id, "phone_id": db_tenant.phone_id})
+    logger.info("Tenant created", extra={"tenant_id": tenant_id})
     return db_tenant
 
 @router.get("/tenants/{tenant_id}", response_model=TenantResponse, dependencies=[Depends(verify_admin_token)])
-def get_tenant(tenant_id: str, db: Session = Depends(get_db)):
-    """Get tenant by ID"""
+async def get_tenant(tenant_id: str, db: Session = Depends(get_db)):
+    """Get a specific tenant by ID"""
     tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
     if not tenant:
         logger.warning("Tenant not found", extra={"tenant_id": tenant_id})
         raise HTTPException(status_code=404, detail="Tenant not found")
     
-    logger.info("Tenant retrieved", extra={"tenant_id": tenant_id})
+    logger.info("Retrieved tenant", extra={"tenant_id": tenant_id})
     return tenant
 
 @router.put("/tenants/{tenant_id}", response_model=TenantResponse, dependencies=[Depends(verify_admin_token)])
-def update_tenant(tenant_id: str, tenant_update: TenantUpdate, db: Session = Depends(get_db)):
-    """Update tenant"""
+async def update_tenant(tenant_id: str, tenant: TenantUpdate, db: Session = Depends(get_db)):
+    """Update a tenant"""
     db_tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
     if not db_tenant:
         logger.warning("Tenant not found for update", extra={"tenant_id": tenant_id})
         raise HTTPException(status_code=404, detail="Tenant not found")
     
-    # Update fields
-    update_data = tenant_update.dict(exclude_unset=True)
-    for field, value in update_data.items():
-        setattr(db_tenant, field, value)
+    # Update fields if provided
+    if tenant.phone_id is not None:
+        # Check if new phone_id already exists
+        if tenant.phone_id != db_tenant.phone_id:
+            existing = db.query(Tenant).filter(Tenant.phone_id == tenant.phone_id).first()
+            if existing:
+                logger.warning("Tenant update failed: phone_id already exists", extra={"phone_id": tenant.phone_id})
+                raise HTTPException(status_code=400, detail="Phone ID already exists")
+        db_tenant.phone_id = tenant.phone_id
+    
+    if tenant.wh_token is not None:
+        db_tenant.wh_token = tenant.wh_token
+    
+    if tenant.system_prompt is not None:
+        db_tenant.system_prompt = tenant.system_prompt
     
     db.commit()
     db.refresh(db_tenant)
     
-    logger.info("Tenant updated", extra={
-        "tenant_id": tenant_id,
-        "updated_fields": list(update_data.keys())
-    })
+    logger.info("Tenant updated", extra={"tenant_id": tenant_id})
     return db_tenant
 
 @router.delete("/tenants/{tenant_id}", dependencies=[Depends(verify_admin_token)])
-def delete_tenant(tenant_id: str, db: Session = Depends(get_db)):
-    """Delete tenant"""
-    db_tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
-    if not db_tenant:
+async def delete_tenant(tenant_id: str, db: Session = Depends(get_db)):
+    """Delete a tenant"""
+    tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
+    if not tenant:
         logger.warning("Tenant not found for deletion", extra={"tenant_id": tenant_id})
         raise HTTPException(status_code=404, detail="Tenant not found")
     
-    db.delete(db_tenant)
+    # Delete tenant
+    db.delete(tenant)
     db.commit()
     
     logger.info("Tenant deleted", extra={"tenant_id": tenant_id})
     return {"status": "success", "message": f"Tenant {tenant_id} deleted"}
 
-# === FAQ Management ===
+@router.get("/tenants/{tenant_id}/messages", response_model=List[MessageResponse], dependencies=[Depends(verify_admin_token)])
+async def get_tenant_messages(
+    tenant_id: str, 
+    limit: int = 50, 
+    offset: int = 0, 
+    db: Session = Depends(get_db)
+):
+    """Get messages for a specific tenant"""
+    tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
+    if not tenant:
+        logger.warning("Tenant not found for message retrieval", extra={"tenant_id": tenant_id})
+        raise HTTPException(status_code=404, detail="Tenant not found")
+    
+    messages = db.query(Message).filter(
+        Message.tenant_id == tenant_id
+    ).order_by(
+        Message.ts.desc()
+    ).offset(offset).limit(limit).all()
+    
+    logger.info("Retrieved messages for tenant", extra={"tenant_id": tenant_id, "count": len(messages)})
+    return messages
+
 @router.get("/tenants/{tenant_id}/faqs", response_model=List[FAQResponse], dependencies=[Depends(verify_admin_token)])
-def get_tenant_faqs(tenant_id: str, db: Session = Depends(get_db)):
-    """Get all FAQs for a tenant"""
+async def get_tenant_faqs(tenant_id: str, db: Session = Depends(get_db)):
+    """Get FAQs for a specific tenant"""
     tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
     if not tenant:
         logger.warning("Tenant not found for FAQ retrieval", extra={"tenant_id": tenant_id})
         raise HTTPException(status_code=404, detail="Tenant not found")
     
     faqs = db.query(FAQ).filter(FAQ.tenant_id == tenant_id).all()
+    
     logger.info("Retrieved FAQs for tenant", extra={"tenant_id": tenant_id, "count": len(faqs)})
     return faqs
 
@@ -146,6 +185,51 @@ async def create_faq(
     })
     
     return db_faq
+
+@router.get("/tenants/{tenant_id}/usage", response_model=UsageStatsResponse, dependencies=[Depends(verify_admin_token)])
+async def get_tenant_usage(
+    tenant_id: str,
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    db: Session = Depends(get_db)
+):
+    """Get usage statistics for a specific tenant"""
+    tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
+    if not tenant:
+        logger.warning("Tenant not found for usage retrieval", extra={"tenant_id": tenant_id})
+        raise HTTPException(status_code=404, detail="Tenant not found")
+    
+    # Get paginated usage items
+    usage_items = db.query(Usage).filter(
+        Usage.tenant_id == tenant_id
+    ).order_by(
+        Usage.msg_ts.desc()
+    ).offset(offset).limit(limit).all()
+    
+    # Get total inbound tokens
+    total_inbound = db.query(func.sum(Usage.tokens)).filter(
+        Usage.tenant_id == tenant_id,
+        Usage.direction == "inbound"
+    ).scalar() or 0
+    
+    # Get total outbound tokens
+    total_outbound = db.query(func.sum(Usage.tokens)).filter(
+        Usage.tenant_id == tenant_id,
+        Usage.direction == "outbound"
+    ).scalar() or 0
+    
+    logger.info("Retrieved usage for tenant", extra={
+        "tenant_id": tenant_id,
+        "items_count": len(usage_items),
+        "total_inbound": total_inbound,
+        "total_outbound": total_outbound
+    })
+    
+    return {
+        "items": usage_items,
+        "total_inbound_tokens": total_inbound,
+        "total_outbound_tokens": total_outbound
+    }
 
 @router.post("/tenants/{tenant_id}/faqs/bulk", response_model=BulkFAQImportResponse, dependencies=[Depends(verify_admin_token)])
 async def bulk_import_faq(
