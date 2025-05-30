@@ -1,53 +1,68 @@
 import os
-from typing import List, Optional, Dict, Any
-from sqlalchemy.orm import Session
+from typing import Dict, Any, List, Optional
 from openai import AsyncOpenAI
-from logging_utils import get_logger
+from sqlalchemy.orm import Session
 from models import FAQ
-from monitoring_utils import track_openai_call
+from logging_utils import get_logger
 
 # Initialize logger
 logger = get_logger(__name__)
 
 # Initialize OpenAI client
 client = None
-EMBEDDING_MODEL_NAME = "text-embedding-3-small"
+try:
+    client = AsyncOpenAI(
+        api_key=os.getenv("OPENAI_API_KEY")
+    )
+except Exception as e:
+    logger.error("Failed to initialize OpenAI client", extra={"error": str(e)}, exc_info=e)
 
-def load_embedding_model():
+# Model names
+EMBEDDING_MODEL_NAME = "text-embedding-ada-002"
+COMPLETION_MODEL_NAME = "gpt-4o"
+
+def track_openai_call(model: str, endpoint: str):
     """
-    Initialize the OpenAI client for embedding generation.
+    Decorator to track OpenAI API calls
     """
-    global client
-    if client is None:
-        api_key = os.getenv("OPENAI_API_KEY")
-        if not api_key:
-            logger.error("OPENAI_API_KEY environment variable is not set")
-            raise ValueError("OPENAI_API_KEY environment variable is not set")
-        
-        client = AsyncOpenAI(api_key=api_key)
-        logger.info("OpenAI client initialized", extra={"model": EMBEDDING_MODEL_NAME})
-    return client
+    def decorator(func):
+        async def wrapper(*args, **kwargs):
+            start_time = __import__("time").time()
+            
+            try:
+                # Call the original function
+                result = await func(*args, **kwargs)
+                
+                # Calculate duration
+                duration = __import__("time").time() - start_time
+                
+                # Log the API call
+                logger.info("OpenAI API call completed", extra={
+                    "model": model,
+                    "endpoint": endpoint,
+                    "duration_seconds": round(duration, 2)
+                })
+                
+                return result
+            except Exception as e:
+                # Log error
+                logger.error("OpenAI API call failed", extra={
+                    "model": model,
+                    "endpoint": endpoint,
+                    "error": str(e)
+                }, exc_info=e)
+                raise
+                
+        return wrapper
+    return decorator
 
 async def generate_embedding(text_content: str) -> Optional[List[float]]:
     """
-    Generate an embedding vector for the given text content using OpenAI's API.
-    
-    Args:
-        text_content: The text to generate an embedding for
-        
-    Returns:
-        A list of floats representing the embedding vector, or None if generation failed
+    Generate an embedding for the given text content using OpenAI's API
     """
     global client
     if client is None:
-        try:
-            load_embedding_model()
-        except Exception as e:
-            logger.error(f"Failed to initialize OpenAI client: {str(e)}")
-            return None
-    
-    if not text_content or not isinstance(text_content, str):
-        logger.warning("Invalid or empty text_content provided for embedding generation.")
+        logger.error("OpenAI client is not initialized. Cannot generate embedding.")
         return None
     
     try:
@@ -132,7 +147,7 @@ async def get_rag_response(db: Session, tenant_id: str, user_query: str, system_
     3. Sends the prompt to an LLM to generate a response.
     
     Returns:
-        Dictionary with answer and sources
+        Dictionary with answer, sources, and token_count
     """
     logger.info("RAG: Processing query", extra={
         "tenant_id": tenant_id,
@@ -169,12 +184,18 @@ async def get_rag_response(db: Session, tenant_id: str, user_query: str, system_
     else:
         llm_answer = f"Based on the information I found regarding '{user_query}':\n\n{context_str}\n\n(This is a conceptual answer. An actual LLM would synthesize this information to directly answer your question.)"
     
+    # Calculate token count (simplified estimation)
+    # In a real implementation, this would come from the OpenAI API response
+    token_count = len(prompt.split()) + len(llm_answer.split())
+    
     logger.info("RAG: Generated response", extra={
         "tenant_id": tenant_id,
-        "response_length": len(llm_answer)
+        "response_length": len(llm_answer),
+        "token_count": token_count
     })
     
     return {
         "answer": llm_answer,
-        "sources": sources
+        "sources": sources,
+        "token_count": token_count
     }
