@@ -1,56 +1,41 @@
 from fastapi import FastAPI, Request, Depends, BackgroundTasks
-from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse
 from fastapi.openapi.docs import get_swagger_ui_html
+import os
+import logging
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
-import os
-
-from db import get_db
+from db import get_db, engine, Base
 from models import Tenant, Message
-from routers import admin, admin_scripts
+from routers import webhook, admin, rag
 from tasks import process_ai_reply
 from monitoring import setup_metrics
-from logging_utils import setup_logging
+from logging_utils import get_logger
 
-# Setup logging first
-logger = setup_logging()
-# Get a logger for this module
-log = logger("main")
+# Initialize logger
+log = get_logger(__name__)
+
+# Create tables
+Base.metadata.create_all(bind=engine)
 
 # Create FastAPI app
 app = FastAPI(
     title="Lumi API",
-    description="Lumi WhatsApp API",
-    version="3.0.0",
-    docs_url=None
+    description="WhatsApp AI Assistant API",
+    version="0.1.0",
+    docs_url=None,
+    redoc_url="/docs"
 )
-
-# Setup logging middleware and exception handlers
-setup_logging(app)
-
-# Log application startup
-log.info("Application starting up")
 
 # Setup metrics
 setup_metrics(app)
-log.info("Metrics setup complete")
-
-# Add CORS middleware
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-log.info("CORS middleware added")
 
 # Include routers
+app.include_router(webhook.router)
 app.include_router(admin.router)
-app.include_router(admin_scripts.router)
-log.info("Routers registered")
+app.include_router(rag.router)
 
-@app.get("/docs", include_in_schema=False)
+@app.get("/docs", response_class=HTMLResponse, include_in_schema=False)
 async def custom_swagger_ui_html():
     log.info("Swagger UI requested")
     return get_swagger_ui_html(
