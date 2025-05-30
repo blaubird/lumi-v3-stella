@@ -5,9 +5,9 @@ from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 import os
 
-from db import get_db, engine, Base
+from db import get_db
 from models import Tenant, Message
-from routers import admin
+from routers import admin, admin_scripts
 from tasks import process_ai_reply
 from monitoring import setup_metrics
 from logging_utils import setup_logging
@@ -47,6 +47,7 @@ log.info("CORS middleware added")
 
 # Include routers
 app.include_router(admin.router)
+app.include_router(admin_scripts.router)
 log.info("Routers registered")
 
 @app.get("/docs", include_in_schema=False)
