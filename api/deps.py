@@ -3,7 +3,6 @@ from fastapi.security import APIKeyHeader
 from sqlalchemy.orm import Session
 import os
 from typing import Generator
-
 from db import SessionLocal
 from logging_utils import get_logger
 
@@ -36,9 +35,9 @@ def verify_admin_token(api_key: str = Security(API_KEY_HEADER)) -> str:
     Raises:
         HTTPException: If API key is invalid
     """
-    admin_token = os.getenv("ADMIN_API_KEY")
+    admin_token = os.getenv("X_ADMIN_TOKEN")
     if not admin_token:
-        logger.error("ADMIN_API_KEY environment variable is not set")
+        logger.error("X_ADMIN_TOKEN environment variable is not set")
         raise HTTPException(
             status_code=500,
             detail="Admin API key is not configured on the server"
