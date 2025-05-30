@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Text, Enum, TIMESTAMP
+from sqlalchemy import Column, Integer, String, ForeignKey, Text, Enum, TIMESTAMP
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 # Conditionally import Vector to handle environments without pgvector
@@ -12,9 +12,7 @@ except ImportError:
         def __call__(self, *args, **kwargs):
             raise ImportError("pgvector is not installed. Please install it with 'pip install pgvector'")
     Vector = VectorPlaceholder()
-
 from db import Base
-
 class Tenant(Base):
     __tablename__ = "tenants"
     
@@ -28,6 +26,7 @@ class Tenant(Base):
     # Relationships
     messages = relationship("Message", back_populates="tenant")
     faqs = relationship("FAQ", back_populates="tenant")
+    usage = relationship("Usage", back_populates="tenant")
 
 class Message(Base):
     __tablename__ = "messages"
@@ -60,3 +59,15 @@ class FAQ(Base):
     
     # Relationships
     tenant = relationship("Tenant", back_populates="faqs")
+
+class Usage(Base):
+    __tablename__ = "usage"
+    
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    tenant_id = Column(String, ForeignKey("tenants.id"), nullable=False, index=True)
+    direction = Column(Enum("inbound", "outbound", name="direction_enum"), nullable=False)
+    tokens = Column(Integer, nullable=False)
+    msg_ts = Column(TIMESTAMP, nullable=False, server_default=func.now())
+    
+    # Relationships
+    tenant = relationship("Tenant", back_populates="usage")
