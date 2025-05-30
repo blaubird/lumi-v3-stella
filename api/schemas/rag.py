@@ -12,8 +12,7 @@ class FAQResponse(FAQBase):
     id: int
     tenant_id: int
     
-    class Config:
-        orm_mode = True
+    model_config = {'from_attributes': True}
 
 class QueryRequest(BaseModel):
     tenant_id: int
