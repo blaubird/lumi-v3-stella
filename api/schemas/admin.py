@@ -20,8 +20,7 @@ class TenantResponse(TenantBase):
     created_at: datetime
     updated_at: datetime
     
-    class Config:
-        from_attributes = True
+    model_config = {'from_attributes': True}
 
 class FAQBase(BaseModel):
     question: str
@@ -37,8 +36,7 @@ class FAQResponse(FAQBase):
     created_at: datetime
     updated_at: datetime
     
-    class Config:
-        from_attributes = True
+    model_config = {'from_attributes': True}
 
 class MessageBase(BaseModel):
     role: str
@@ -51,8 +49,7 @@ class MessageResponse(MessageBase):
     tokens: Optional[int] = None
     ts: datetime
     
-    class Config:
-        from_attributes = True
+    model_config = {'from_attributes': True}
 
 class UsageResponse(BaseModel):
     id: int
@@ -61,8 +58,7 @@ class UsageResponse(BaseModel):
     tokens: int
     msg_ts: datetime
     
-    class Config:
-        from_attributes = True
+    model_config = {'from_attributes': True}
 
 class UsageStatsResponse(BaseModel):
     items: List[UsageResponse]
