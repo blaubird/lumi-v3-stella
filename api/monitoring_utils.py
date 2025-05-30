@@ -1,75 +1,176 @@
 import time
-import functools
-import os
-from prometheus_client import Counter, Histogram, start_http_server
+from prometheus_client import Counter, Histogram, Gauge, CollectorRegistry, generate_latest, CONTENT_TYPE_LATEST
+from fastapi import FastAPI, Request, Response
+from logging_utils import get_logger
 
-# Prometheus metrics
-OPENAI_CALLS = Counter(
-    'openai_api_calls_total', 
-    'Total number of OpenAI API calls',
-    ['model', 'endpoint', 'status']
+# Initialize logger
+logger = get_logger(__name__)
+
+# Create a registry
+registry = CollectorRegistry()
+
+# Create metrics
+http_requests_total = Counter(
+    'http_requests_total',
+    'Total count of HTTP requests',
+    ['method', 'endpoint', 'status_code'],
+    registry=registry
 )
 
-OPENAI_LATENCY = Histogram(
-    'openai_api_latency_seconds',
-    'Latency of OpenAI API calls in seconds',
+http_request_duration_seconds = Histogram(
+    'http_request_duration_seconds',
+    'HTTP request latency in seconds',
+    ['method', 'endpoint'],
+    registry=registry
+)
+
+openai_api_calls_total = Counter(
+    'openai_api_calls_total',
+    'Total count of OpenAI API calls',
     ['model', 'endpoint'],
-    buckets=(0.1, 0.5, 1.0, 2.0, 5.0, 10.0, 30.0, 60.0)
+    registry=registry
 )
 
-def setup_monitoring(app):
-    """
-    Sets up monitoring for FastAPI application.
-    Starts HTTP server for Prometheus metrics on port specified in
-    PROMETHEUS_PORT environment variable (default 9090).
-    """
-    # Get port from environment variable or use 9090 as default
-    prometheus_port = int(os.getenv("PROMETHEUS_PORT", 9090))
-    
-    try:
-        # Start HTTP server for Prometheus metrics
-        start_http_server(prometheus_port)
-    except OSError as e:
-        # If port is busy, try another port
-        if e.errno == 98:  # Address already in use
-            fallback_port = prometheus_port + 1
-            print(f"Port {prometheus_port} is already in use. Trying port {fallback_port}")
-            start_http_server(fallback_port)
-    
-    # Add middleware for tracking FastAPI requests
-    # This middleware is separate from the logging middleware to avoid conflicts
-    @app.middleware("http")
-    async def add_process_time_header(request, call_next):
-        start_time = time.time()
-        response = await call_next(request)
-        process_time = time.time() - start_time
-        response.headers["X-Process-Time"] = str(process_time)
-        return response
-    
-    return app
+openai_api_tokens_total = Counter(
+    'openai_api_tokens_total',
+    'Total count of tokens used in OpenAI API calls',
+    ['model', 'type'],
+    registry=registry
+)
 
-def track_openai_call(model, endpoint):
+openai_api_duration_seconds = Histogram(
+    'openai_api_duration_seconds',
+    'OpenAI API call latency in seconds',
+    ['model', 'endpoint'],
+    registry=registry
+)
+
+active_tenants_gauge = Gauge(
+    'active_tenants_count',
+    'Number of active tenants',
+    registry=registry
+)
+
+active_users_gauge = Gauge(
+    'active_users_count',
+    'Number of active users in the last 24 hours',
+    registry=registry
+)
+
+class PrometheusMiddleware:
     """
-    Decorator for tracking OpenAI API calls.
-    Records metrics in Prometheus.
+    Middleware for collecting HTTP request metrics
+    """
+    def __init__(self, app: FastAPI):
+        self.app = app
     
-    Args:
-        model: OpenAI model name (e.g., "gpt-4")
-        endpoint: API endpoint name (e.g., "chat/completions")
+    async def __call__(self, request: Request, call_next):
+        start_time = time.time()
+        
+        # Process request
+        response = await call_next(request)
+        
+        # Measure execution time
+        duration = time.time() - start_time
+        
+        # Get endpoint (without query parameters)
+        endpoint = request.url.path
+        
+        # Increment request counter
+        http_requests_total.labels(
+            method=request.method,
+            endpoint=endpoint,
+            status_code=response.status_code
+        ).inc()
+        
+        # Record execution time
+        http_request_duration_seconds.labels(
+            method=request.method,
+            endpoint=endpoint
+        ).observe(duration)
+        
+        return response
+
+def track_openai_call(model: str, endpoint: str):
+    """
+    Decorator for tracking OpenAI API calls
     """
     def decorator(func):
-        @functools.wraps(func)
         async def wrapper(*args, **kwargs):
             start_time = time.time()
+            
+            # Increment API call counter
+            openai_api_calls_total.labels(
+                model=model,
+                endpoint=endpoint
+            ).inc()
+            
             try:
+                # Execute original function
                 result = await func(*args, **kwargs)
-                OPENAI_CALLS.labels(model=model, endpoint=endpoint, status="success").inc()
+                
+                # If there's token information, record it
+                if hasattr(result, 'usage') and result.usage:
+                    if hasattr(result.usage, 'prompt_tokens'):
+                        openai_api_tokens_total.labels(
+                            model=model,
+                            type='prompt'
+                        ).inc(result.usage.prompt_tokens)
+                    
+                    if hasattr(result.usage, 'completion_tokens'):
+                        openai_api_tokens_total.labels(
+                            model=model,
+                            type='completion'
+                        ).inc(result.usage.completion_tokens)
+                
                 return result
-            except Exception as e:
-                OPENAI_CALLS.labels(model=model, endpoint=endpoint, status="error").inc()
-                raise e
             finally:
-                end_time = time.time()
-                OPENAI_LATENCY.labels(model=model, endpoint=endpoint).observe(end_time - start_time)
+                # Record execution time
+                duration = time.time() - start_time
+                openai_api_duration_seconds.labels(
+                    model=model,
+                    endpoint=endpoint
+                ).observe(duration)
+        
         return wrapper
+    
     return decorator
+
+def update_active_tenants(count: int):
+    """
+    Update active tenants metric
+    """
+    active_tenants_gauge.set(count)
+
+def update_active_users(count: int):
+    """
+    Update active users metric
+    """
+    active_users_gauge.set(count)
+
+def setup_metrics(app: FastAPI):
+    """
+    Setup metrics for FastAPI application
+    
+    Args:
+        app: FastAPI application instance
+    """
+    # Add middleware for collecting HTTP request metrics
+    app.add_middleware(PrometheusMiddleware)
+    
+    # Add endpoint for exporting metrics
+    @app.get("/metrics", include_in_schema=False)
+    async def metrics():
+        return Response(
+            content=generate_latest(registry),
+            media_type=CONTENT_TYPE_LATEST
+        )
+    
+    # Initialize metrics at startup
+    @app.on_event("startup")
+    async def startup_metrics():
+        # Initialize metrics that require database data
+        # For example, number of active tenants
+        pass
+    
+    return app
