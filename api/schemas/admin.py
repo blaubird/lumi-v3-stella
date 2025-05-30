@@ -1,5 +1,5 @@
-from pydantic import BaseModel, Field
-from typing import List, Optional
+from pydantic import BaseModel
+from typing import Optional
 from datetime import datetime
 
 class TenantBase(BaseModel):
@@ -9,6 +9,11 @@ class TenantBase(BaseModel):
 
 class TenantCreate(TenantBase):
     pass
+
+class TenantUpdate(BaseModel):
+    phone_id: Optional[str] = None
+    wh_token: Optional[str] = None
+    system_prompt: Optional[str] = None
 
 class TenantResponse(TenantBase):
     id: str
