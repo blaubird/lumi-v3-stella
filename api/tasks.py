@@ -1,10 +1,8 @@
 import os
 import httpx
-from fastapi import BackgroundTasks
 from sqlalchemy.orm import Session
-from sqlalchemy.exc import IntegrityError
 from db import get_db
-from models import Message
+from models import Message, Tenant
 from openai import AsyncOpenAI
 
 async def process_ai_reply(tenant_id: str, wa_msg_id: str, text: str):
@@ -62,9 +60,6 @@ async def process_ai_reply(tenant_id: str, wa_msg_id: str, text: str):
         db.add(db_message)
         db.commit()
         db.refresh(db_message)
-        
-        # Get RAG response if needed
-        rag_response = await get_rag_response(tenant_id, text, db)
         
         # Send reply to WhatsApp
         await send_whatsapp_message(
