@@ -2,9 +2,8 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 from typing import Dict, Any
 import json
-
 from db import get_db
-from models import Tenant, Message
+from models import Tenant, Message, Usage
 from services.whatsapp import WhatsAppService
 from ai import get_rag_response
 from logging_utils import get_logger
@@ -106,6 +105,14 @@ async def process_message(db: Session, tenant: Tenant, message: Dict[str, Any]):
         text=text
     )
     db.add(user_message)
+    
+    # Track inbound message usage (with 0 tokens as specified)
+    usage_record = Usage(
+        tenant_id=tenant.id,
+        direction="inbound",
+        tokens=0
+    )
+    db.add(usage_record)
     db.commit()
     
     # Generate response using RAG
@@ -118,14 +125,24 @@ async def process_message(db: Session, tenant: Tenant, message: Dict[str, Any]):
         )
         
         answer = response["answer"]
+        token_count = response.get("token_count", 0)  # Get token count from response
         
         # Save bot message
         bot_message = Message(
             tenant_id=tenant.id,
             role="bot",
-            text=answer
+            text=answer,
+            tokens=token_count
         )
         db.add(bot_message)
+        
+        # Track outbound message usage with actual token count
+        outbound_usage = Usage(
+            tenant_id=tenant.id,
+            direction="outbound",
+            tokens=token_count
+        )
+        db.add(outbound_usage)
         db.commit()
         
         # Send response via WhatsApp
@@ -138,7 +155,8 @@ async def process_message(db: Session, tenant: Tenant, message: Dict[str, Any]):
         logger.info("Response sent", extra={
             "tenant_id": tenant.id,
             "to": from_number,
-            "response_length": len(answer)
+            "response_length": len(answer),
+            "token_count": token_count
         })
     except Exception as e:
         logger.error("Error processing message", extra={
