@@ -2,6 +2,7 @@ from fastapi import FastAPI, Request, Depends, BackgroundTasks
 from fastapi.responses import HTMLResponse
 from fastapi.openapi.docs import get_swagger_ui_html
 import os
+import sys
 import logging
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
@@ -11,9 +12,24 @@ from routers import webhook, admin, rag
 from tasks import process_ai_reply
 from monitoring import setup_metrics
 from logging_utils import get_logger
+from alembic.config import Config as AlembicConfig
+from alembic import command
+
+# Configure basic logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    stream=sys.stdout
+)
+
+# Propagate root handlers to specific loggers
+for logger_name in ["api", "hypercorn", "sqlalchemy"]:
+    logger = logging.getLogger(logger_name)
+    logger.handlers = []
+    logger.propagate = True
 
 # Initialize logger
-log = get_logger(__name__)
+log = logging.getLogger("api")
 
 # Create tables
 Base.metadata.create_all(bind=engine)
@@ -26,6 +42,24 @@ app = FastAPI(
     docs_url=None,
     redoc_url="/docs"
 )
+
+@app.on_event("startup")
+async def startup_event():
+    # Apply migrations
+    log.info("Applying Alembic migrations...")
+    alembic_cfg = AlembicConfig("alembic.ini")
+    command.upgrade(alembic_cfg, "head")
+    log.info("Migrations applied")
+    
+    # Setup metrics
+    setup_metrics(app)
+    log.info("Metrics setup complete")
+    
+    # CORS middleware is implicitly added
+    log.info("CORS middleware added")
+    
+    # Routers are registered
+    log.info("Routers registered")
 
 # Setup metrics
 setup_metrics(app)
