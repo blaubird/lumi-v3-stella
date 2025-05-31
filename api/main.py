@@ -14,35 +14,24 @@ from monitoring import setup_metrics
 from logging_utils import get_logger
 from alembic.config import Config as AlembicConfig
 from alembic import command
-from safer_lifespan import safer_lifespan  # Import the safer lifespan
+from contextlib import asynccontextmanager
 
 # Configure root logger at INFO level
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s %(levelname)s %(name)s %(message)s',
-    stream=sys.stdout
+    format="%(asctime)s %(levelname)s %(name)s %(message)s",
+    stream=sys.stdout,
 )
 
 # Propagate root handlers to specific loggers
-for name in ("api", "hypercorn", "sqlalchemy"):
+for name in ("api", "hypercorn.access", "hypercorn.error", "sqlalchemy"):
     logging.getLogger(name).handlers = logging.root.handlers
     logging.getLogger(name).propagate = True
 
-# Log application startup
 logging.info("Starting application")
 
-# Create FastAPI app with safer lifespan
-app = FastAPI(
-    title="Lumi API",
-    description="WhatsApp AI Assistant API",
-    version="0.1.0",
-    docs_url=None,
-    redoc_url="/docs",
-    lifespan=safer_lifespan  # Use the safer lifespan
-)
-
-@app.on_event("startup")
-async def startup_event():
+@asynccontextmanager
+async def lifespan(app: FastAPI):
     # Apply Alembic migrations
     logging.info("Applying Alembic migrations...")
     alembic_cfg = AlembicConfig("alembic.ini")
@@ -54,11 +43,12 @@ async def startup_event():
     Base.metadata.create_all(bind=engine)
     
     # Setup metrics
-    logging.info("Setting up metrics...")
+    logging.info("Setting up metrics")
     setup_metrics(app)
     logging.info("Metrics setup complete")
     
     # Add CORS middleware
+    logging.info("Adding CORS middleware")
     from fastapi.middleware.cors import CORSMiddleware
     app.add_middleware(
         CORSMiddleware,
@@ -70,12 +60,25 @@ async def startup_event():
     logging.info("CORS middleware added")
     
     # Include routers
+    logging.info("Registering routers")
     app.include_router(webhook.router)
     app.include_router(admin.router)
     app.include_router(rag.router)
     logging.info("Routers registered")
     
-    logging.info("Application startup finished")
+    yield
+    
+    # Optional shutdown logs could be added here
+
+# Create FastAPI app with lifespan
+app = FastAPI(
+    title="Lumi API",
+    description="WhatsApp AI Assistant API",
+    version="0.1.0",
+    docs_url=None,
+    redoc_url="/docs",
+    lifespan=lifespan
+)
 
 # Initialize logger
 log = logging.getLogger("api")
