@@ -1,5 +1,5 @@
 """Initial schema migration
-Revision ID: 0001_initial
+Revision ID: 001_initial_schema
 Revises: 
 Create Date: 2025-05-28 14:47:00.000000
 """
@@ -8,7 +8,7 @@ import sqlalchemy as sa
 from pgvector.sqlalchemy import Vector
 
 # revision identifiers, used by Alembic.
-revision = '0001_initial'
+revision = '001_initial_schema'
 down_revision = None
 branch_labels = None
 depends_on = None
