@@ -16,24 +16,20 @@ from alembic.config import Config as AlembicConfig
 from alembic import command
 from safer_lifespan import safer_lifespan  # Import the safer lifespan
 
-# Configure basic logging
+# Configure root logger at INFO level
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    format='%(asctime)s %(levelname)s %(name)s %(message)s',
     stream=sys.stdout
 )
 
 # Propagate root handlers to specific loggers
-for logger_name in ["api", "hypercorn", "sqlalchemy"]:
-    logger = logging.getLogger(logger_name)
-    logger.handlers = []
-    logger.propagate = True
+for name in ("api", "hypercorn", "sqlalchemy"):
+    logging.getLogger(name).handlers = logging.root.handlers
+    logging.getLogger(name).propagate = True
 
-# Initialize logger
-log = logging.getLogger("api")
-
-# Create tables
-Base.metadata.create_all(bind=engine)
+# Log application startup
+logging.info("Starting application")
 
 # Create FastAPI app with safer lifespan
 app = FastAPI(
@@ -45,10 +41,44 @@ app = FastAPI(
     lifespan=safer_lifespan  # Use the safer lifespan
 )
 
-# Include routers
-app.include_router(webhook.router)
-app.include_router(admin.router)
-app.include_router(rag.router)
+@app.on_event("startup")
+async def startup_event():
+    # Apply Alembic migrations
+    logging.info("Applying Alembic migrations...")
+    alembic_cfg = AlembicConfig("alembic.ini")
+    command.upgrade(alembic_cfg, "head")
+    logging.info("Migrations applied")
+    
+    # Initialize database engine
+    logging.info("Initializing database engine")
+    Base.metadata.create_all(bind=engine)
+    
+    # Setup metrics
+    logging.info("Setting up metrics...")
+    setup_metrics(app)
+    logging.info("Metrics setup complete")
+    
+    # Add CORS middleware
+    from fastapi.middleware.cors import CORSMiddleware
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+    logging.info("CORS middleware added")
+    
+    # Include routers
+    app.include_router(webhook.router)
+    app.include_router(admin.router)
+    app.include_router(rag.router)
+    logging.info("Routers registered")
+    
+    logging.info("Application startup finished")
+
+# Initialize logger
+log = logging.getLogger("api")
 
 @app.get("/docs", response_class=HTMLResponse, include_in_schema=False)
 async def custom_swagger_ui_html():
