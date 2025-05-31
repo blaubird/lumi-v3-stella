@@ -14,7 +14,7 @@ from monitoring import setup_metrics
 from logging_utils import get_logger
 from alembic.config import Config as AlembicConfig
 from alembic import command
-from contextlib import asynccontextmanager
+from safer_lifespan import safer_lifespan  # Import the safer lifespan
 
 # Configure basic logging
 logging.basicConfig(
@@ -35,37 +35,14 @@ log = logging.getLogger("api")
 # Create tables
 Base.metadata.create_all(bind=engine)
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    # Apply migrations
-    log.info("Applying Alembic migrations...")
-    alembic_cfg = AlembicConfig("alembic.ini")
-    command.upgrade(alembic_cfg, "head")
-    log.info("Migrations applied")
-    
-    # Setup metrics
-    setup_metrics(app)
-    log.info("Metrics setup complete")
-    
-    # CORS middleware is implicitly added
-    log.info("CORS middleware added")
-    
-    # Routers are registered
-    log.info("Routers registered")
-    
-    yield
-    
-    # Shutdown logic here if needed
-    log.info("Application shutting down")
-
-# Create FastAPI app
+# Create FastAPI app with safer lifespan
 app = FastAPI(
     title="Lumi API",
     description="WhatsApp AI Assistant API",
     version="0.1.0",
     docs_url=None,
     redoc_url="/docs",
-    lifespan=lifespan
+    lifespan=safer_lifespan  # Use the safer lifespan
 )
 
 # Include routers
