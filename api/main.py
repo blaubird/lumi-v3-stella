@@ -15,6 +15,7 @@ from logging_utils import get_logger
 from alembic.config import Config as AlembicConfig
 from alembic import command
 from contextlib import asynccontextmanager
+from fastapi.middleware.cors import CORSMiddleware
 
 # Configure root logger at INFO level
 logging.basicConfig(
@@ -47,24 +48,7 @@ async def lifespan(app: FastAPI):
     setup_metrics(app)
     logging.info("Metrics setup complete")
     
-    # Add CORS middleware
-    logging.info("Adding CORS middleware")
-    from fastapi.middleware.cors import CORSMiddleware
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=["*"],
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
-    logging.info("CORS middleware added")
-    
-    # Include routers
-    logging.info("Registering routers")
-    app.include_router(webhook.router)
-    app.include_router(admin.router)
-    app.include_router(rag.router)
-    logging.info("Routers registered")
+    logging.info("Application startup finished")
     
     yield
     
@@ -79,6 +63,24 @@ app = FastAPI(
     redoc_url="/docs",
     lifespan=lifespan
 )
+
+# Add CORS middleware - MUST be before app startup
+logging.info("Adding CORS middleware")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+logging.info("CORS middleware added")
+
+# Include routers - MUST be before app startup
+logging.info("Registering routers")
+app.include_router(webhook.router)
+app.include_router(admin.router)
+app.include_router(rag.router)
+logging.info("Routers registered")
 
 # Initialize logger
 log = logging.getLogger("api")
