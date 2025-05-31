@@ -14,6 +14,7 @@ from monitoring import setup_metrics
 from logging_utils import get_logger
 from alembic.config import Config as AlembicConfig
 from alembic import command
+from contextlib import asynccontextmanager
 
 # Configure basic logging
 logging.basicConfig(
@@ -34,17 +35,8 @@ log = logging.getLogger("api")
 # Create tables
 Base.metadata.create_all(bind=engine)
 
-# Create FastAPI app
-app = FastAPI(
-    title="Lumi API",
-    description="WhatsApp AI Assistant API",
-    version="0.1.0",
-    docs_url=None,
-    redoc_url="/docs"
-)
-
-@app.on_event("startup")
-async def startup_event():
+@asynccontextmanager
+async def lifespan(app: FastAPI):
     # Apply migrations
     log.info("Applying Alembic migrations...")
     alembic_cfg = AlembicConfig("alembic.ini")
@@ -60,9 +52,21 @@ async def startup_event():
     
     # Routers are registered
     log.info("Routers registered")
+    
+    yield
+    
+    # Shutdown logic here if needed
+    log.info("Application shutting down")
 
-# Setup metrics
-setup_metrics(app)
+# Create FastAPI app
+app = FastAPI(
+    title="Lumi API",
+    description="WhatsApp AI Assistant API",
+    version="0.1.0",
+    docs_url=None,
+    redoc_url="/docs",
+    lifespan=lifespan
+)
 
 # Include routers
 app.include_router(webhook.router)
