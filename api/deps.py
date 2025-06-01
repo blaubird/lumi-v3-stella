@@ -18,7 +18,7 @@ def get_db() -> Generator[Session, None, None]:
     finally:
         db.close()
 
-def verify_admin_token(x_admin_token: str = Header(..., alias="X-Admin-Token")) -> str:
+def verify_admin_token(x_admin_token: str = Header(None, alias="X-Admin-Token")) -> str:
     """
     Verify admin API key
     
@@ -29,8 +29,18 @@ def verify_admin_token(x_admin_token: str = Header(..., alias="X-Admin-Token")) 
         Admin token if valid
         
     Raises:
-        HTTPException: If admin token is invalid
+        HTTPException: If admin token is invalid or missing
     """
+    # Check if header was provided
+    if not x_admin_token:
+        logger.warning("No admin token provided in request header")
+        raise HTTPException(
+            status_code=401,
+            detail="Admin token is required",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    
+    # Get admin token from environment variable
     admin_token = os.getenv("X_ADMIN_TOKEN")
     if not admin_token:
         logger.error("X_ADMIN_TOKEN environment variable is not set")
@@ -39,8 +49,9 @@ def verify_admin_token(x_admin_token: str = Header(..., alias="X-Admin-Token")) 
             detail="Admin API key is not configured on the server"
         )
     
+    # Verify token matches
     if x_admin_token != admin_token:
-        logger.warning("Invalid admin token provided", extra={"provided_token_length": len(x_admin_token) if x_admin_token else 0})
+        logger.warning("Invalid admin token provided", extra={"provided_token_length": len(x_admin_token)})
         raise HTTPException(
             status_code=401,
             detail="Invalid admin token",
