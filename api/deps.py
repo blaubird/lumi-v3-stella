@@ -1,5 +1,4 @@
-from fastapi import HTTPException, Security
-from fastapi.security import APIKeyHeader
+from fastapi import HTTPException, Header
 from sqlalchemy.orm import Session
 import os
 from typing import Generator
@@ -8,9 +7,6 @@ from logging_utils import get_logger
 
 # Initialize logger
 logger = get_logger(__name__)
-
-# API key header for admin authentication
-API_KEY_HEADER = APIKeyHeader(name="X-API-Key", auto_error=False)
 
 def get_db() -> Generator[Session, None, None]:
     """
@@ -22,18 +18,18 @@ def get_db() -> Generator[Session, None, None]:
     finally:
         db.close()
 
-def verify_admin_token(api_key: str = Security(API_KEY_HEADER)) -> str:
+def verify_admin_token(x_admin_token: str = Header(..., alias="X-Admin-Token")) -> str:
     """
     Verify admin API key
     
     Args:
-        api_key: API key from request header
+        x_admin_token: Admin token from request header
         
     Returns:
-        API key if valid
+        Admin token if valid
         
     Raises:
-        HTTPException: If API key is invalid
+        HTTPException: If admin token is invalid
     """
     admin_token = os.getenv("X_ADMIN_TOKEN")
     if not admin_token:
@@ -43,13 +39,13 @@ def verify_admin_token(api_key: str = Security(API_KEY_HEADER)) -> str:
             detail="Admin API key is not configured on the server"
         )
     
-    if api_key != admin_token:
-        logger.warning("Invalid admin API key provided", extra={"provided_key_length": len(api_key) if api_key else 0})
+    if x_admin_token != admin_token:
+        logger.warning("Invalid admin token provided", extra={"provided_token_length": len(x_admin_token) if x_admin_token else 0})
         raise HTTPException(
             status_code=401,
-            detail="Invalid API key",
-            headers={"WWW-Authenticate": "ApiKey"},
+            detail="Invalid admin token",
+            headers={"WWW-Authenticate": "Bearer"},
         )
     
-    logger.info("Admin API key verified successfully")
-    return api_key
+    logger.info("Admin token verified successfully")
+    return x_admin_token
