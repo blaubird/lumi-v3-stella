@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Request, Depends, BackgroundTasks
+from fastapi import FastAPI, Request, BackgroundTasks
 from fastapi.responses import HTMLResponse
 from fastapi.openapi.docs import get_swagger_ui_html
 import os
@@ -102,79 +102,7 @@ async def health_check():
     log.info("Health check requested")
     return {"status": "ok"}
 
-@app.post("/webhook")
-async def webhook(request: Request, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
-    """
-    WhatsApp webhook endpoint
-    """
-    log.info("Webhook request received")
-    body = await request.json()
-    
-    # Process webhook
-    if "object" in body and body["object"] == "whatsapp_business_account":
-        log.info("Processing WhatsApp webhook", extra={"account_id": body.get("id")})
-        for entry in body.get("entry", []):
-            for change in entry.get("changes", []):
-                if change.get("field") == "messages":
-                    value = change.get("value", {})
-                    
-                    # Process messages
-                    for message in value.get("messages", []):
-                        if message.get("type") == "text":
-                            # Extract message details
-                            whatsapp_msg_id = message.get("id")
-                            sender_phone = message.get("from")
-                            text_content = message.get("text", {}).get("body", "")
-                            
-                            log.info(
-                                "Processing text message", 
-                                extra={
-                                    "msg_id": whatsapp_msg_id,
-                                    "sender": sender_phone,
-                                    "content_length": len(text_content)
-                                }
-                            )
-                            
-                            # Find tenant by phone ID
-                            tenant = db.query(Tenant).filter(Tenant.phone_id == value.get("metadata", {}).get("phone_number_id")).first()
-                            if not tenant:
-                                log.warning("Tenant not found for phone ID", extra={"phone_id": value.get("metadata", {}).get("phone_number_id")})
-                                continue
-                            
-                            # Save message
-                            try:
-                                db_message = Message(
-                                    tenant_id=tenant.id,
-                                    wa_msg_id=whatsapp_msg_id,
-                                    role="user",
-                                    text=text_content
-                                )
-                                db.add(db_message)
-                                db.commit()
-                                db.refresh(db_message)
-                                log.info("Message saved to database", extra={"db_id": db_message.id})
-                                
-                                # Process AI reply in background
-                                log.info("Scheduling AI reply processing")
-                                background_tasks.add_task(
-                                    process_ai_reply,
-                                    tenant_id=tenant.id,
-                                    wa_msg_id=whatsapp_msg_id,
-                                    text=text_content
-                                )
-                                
-                            except IntegrityError as e:
-                                log.error("Database integrity error", exc_info=e)
-                                db.rollback()
-                                continue
-                            except Exception as e:
-                                log.error("Unexpected error processing message", exc_info=e)
-                                db.rollback()
-                                continue
-    else:
-        log.warning("Received non-WhatsApp webhook", extra={"object_type": body.get("object")})
-    
-    return {"status": "received"}
+# Removed duplicate @app.post("/webhook") handler as it's now handled by the router
 
 if __name__ == "__main__":
     import hypercorn.asyncio
