@@ -1,12 +1,13 @@
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, Query
-from sqlalchemy.orm import Session
-from typing import Dict, Any, Optional
-import json
 import os
+import json
+import logging
+from typing import Dict, Any, List
+from fastapi import APIRouter, Depends, HTTPException, Request, Query, Response, BackgroundTasks
+from sqlalchemy.orm import Session
 from db import get_db
 from models import Tenant, Message, Usage
-from services.whatsapp import WhatsAppService
 from ai import get_rag_response
+from services.whatsapp import send_whatsapp_message
 from logging_utils import get_logger
 
 # Initialize logger
@@ -145,12 +146,13 @@ async def process_message(db: Session, tenant: Tenant, message: Dict[str, Any]):
         db.add(outbound_usage)
         db.commit()
         
-        # Send response via WhatsApp
-        whatsapp = WhatsAppService(
+        # Send response via WhatsApp using the send_whatsapp_message function
+        await send_whatsapp_message(
             phone_id=tenant.phone_id,
-            token=tenant.wh_token
+            token=tenant.wh_token,
+            recipient=from_number,
+            message=answer
         )
-        await whatsapp.send_message(to=from_number, text=answer)
         
         logger.info("Response sent", extra={
             "tenant_id": tenant.id,
