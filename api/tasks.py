@@ -1,11 +1,20 @@
 import os
-import httpx
+import logging
+from typing import List, Dict, Any
 from sqlalchemy.orm import Session
-from db import get_db
-from models import Message, Tenant
 from openai import AsyncOpenAI
+from db import get_db
+from models import Tenant, Message, Usage
+from ai import generate_embedding, find_relevant_faqs
+from services.whatsapp import send_whatsapp_message
+from logging_utils import get_logger
 
-async def process_ai_reply(tenant_id: str, wa_msg_id: str, text: str):
+logger = get_logger(__name__)
+
+# Get OpenAI model from environment
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4")
+
+async def process_ai_reply(tenant_id: str, wa_msg_id: str, user_text: str):
     """
     Process AI reply asynchronously
     
@@ -18,105 +27,120 @@ async def process_ai_reply(tenant_id: str, wa_msg_id: str, text: str):
     db = next(get_db())
     
     try:
+        logger.info("Starting AI reply processing", extra={
+            "tenant_id": tenant_id,
+            "wa_msg_id": wa_msg_id,
+            "text_length": len(user_text)
+        })
+        
         # Get tenant information
         tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
         if not tenant:
-            print(f"Tenant not found: {tenant_id}")
+            logger.error(f"Tenant not found", extra={"tenant_id": tenant_id})
             return
         
-        # Get chat history
-        chat_history_query = (
+        # Run embedding lookup and retrieve top-K FAQs
+        relevant_faqs = await find_relevant_faqs(db, tenant_id, user_text, top_k=3)
+        
+        # Build context from FAQs
+        faq_context = ""
+        if relevant_faqs:
+            faq_parts = []
+            for i, faq in enumerate(relevant_faqs):
+                faq_parts.append(f"FAQ {i+1}:\nQ: {faq.question}\nA: {faq.answer}")
+            faq_context = "Relevant information from knowledge base:\n" + "\n\n".join(faq_parts)
+        else:
+            faq_context = "No specific information found in the knowledge base for this query."
+        
+        # Build messages list with system prompt first
+        messages = [
+            {"role": "system", "content": tenant.system_prompt + "\n\n" + faq_context}
+        ]
+        
+        # Add recent conversation history
+        history_messages = (
             db.query(Message)
             .filter_by(tenant_id=tenant_id)
             .order_by(Message.id.desc())
-            .limit(10)
+            .limit(6)  # Last 3 exchanges (3 user + 3 bot messages)
+            .all()[::-1]  # Reverse to get chronological order
         )
-        history_messages = chat_history_query.all()[::-1]
         
-        # Prepare chat context
-        chat_context = [
-            {"role": "system", "content": tenant.system_prompt}
-        ] + [{"role": m.role, "content": m.text} for m in history_messages]
+        for msg in history_messages:
+            messages.append({"role": msg.role, "content": msg.text})
         
-        # Get AI response
-        ai = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        # Add current user message
+        messages.append({"role": "user", "content": user_text})
+        
+        logger.info("Calling OpenAI API", extra={
+            "tenant_id": tenant_id,
+            "model": OPENAI_MODEL,
+            "message_count": len(messages),
+            "temperature": 0.2
+        })
+        
+        # Call OpenAI API
+        api_key = os.getenv("OPENAI_API_KEY")
+        if not api_key:
+            logger.error("OPENAI_API_KEY environment variable not set")
+            return
+            
+        ai = AsyncOpenAI(api_key=api_key)
         response = await ai.chat.completions.create(
-            model="gpt-4",
-            messages=chat_context,
-            temperature=0.7,
-            max_tokens=500
+            model=OPENAI_MODEL,
+            messages=messages,
+            temperature=0.2
         )
         
-        ai_reply = response.choices[0].message.content
+        # Extract reply text and token count
+        reply_text = response.choices[0].message.content
         token_count = response.usage.total_tokens
         
-        # Save AI reply to database
-        db_message = Message(
+        logger.info("Received OpenAI response", extra={
+            "tenant_id": tenant_id,
+            "token_count": token_count,
+            "reply_length": len(reply_text)
+        })
+        
+        # Save bot message
+        bot_message = Message(
             tenant_id=tenant_id,
             role="bot",
-            text=ai_reply,
+            text=reply_text,
             tokens=token_count
         )
-        db.add(db_message)
-        db.commit()
-        db.refresh(db_message)
+        db.add(bot_message)
         
-        # Send reply to WhatsApp
-        await send_whatsapp_message(
-            phone_id=tenant.phone_id,
-            token=tenant.wh_token,
-            recipient=wa_msg_id.split(':')[0],  # Extract phone number from wa_msg_id
-            message=ai_reply
+        # Insert outbound usage record
+        usage_record = Usage(
+            tenant_id=tenant_id,
+            direction="outbound",
+            tokens=token_count
         )
+        db.add(usage_record)
+        db.commit()
+        
+        # Get WhatsApp credentials from tenant
+        phone_id = os.getenv("WH_PHONE_ID", tenant.phone_id)
+        token = os.getenv("WH_TOKEN", tenant.wh_token)
+        
+        # Extract user phone from wa_msg_id (format: "phone:message_id")
+        user_phone = wa_msg_id.split(":")[0] if ":" in wa_msg_id else wa_msg_id
+        
+        # Send WhatsApp message
+        await send_whatsapp_message(phone_id, token, user_phone, reply_text)
+        
+        logger.info("WhatsApp message sent", extra={
+            "tenant_id": tenant_id,
+            "to": user_phone
+        })
         
     except Exception as e:
-        print(f"Error in process_ai_reply: {str(e)}")
+        logger.error("Error in process_ai_reply", extra={
+            "tenant_id": tenant_id,
+            "error": str(e)
+        }, exc_info=e)
     finally:
+        # Close the DB session
         db.close()
-
-async def get_rag_response(tenant_id: str, query: str, db: Session):
-    """
-    Get RAG response for a query
-    
-    Args:
-        tenant_id: Tenant ID
-        query: User query
-        db: Database session
-    
-    Returns:
-        str: RAG response
-    """
-    # Implementation of RAG response logic
-    # This is a placeholder for the actual implementation
-    return "RAG response placeholder"
-
-async def send_whatsapp_message(phone_id: str, token: str, recipient: str, message: str):
-    """
-    Send WhatsApp message
-    
-    Args:
-        phone_id: WhatsApp phone ID
-        token: WhatsApp token
-        recipient: Recipient phone number
-        message: Message text
-    """
-    try:
-        url = f"https://graph.facebook.com/v17.0/{phone_id}/messages"
-        headers = {
-            "Authorization": f"Bearer {token}",
-            "Content-Type": "application/json"
-        }
-        payload = {
-            "messaging_product": "whatsapp",
-            "to": recipient,
-            "type": "text",
-            "text": {"body": message}
-        }
-        
-        async with httpx.AsyncClient() as client:
-            response = await client.post(url, headers=headers, json=payload)
-            response.raise_for_status()
-            return response.json()
-    except Exception as e:
-        print(f"Error sending WhatsApp message: {str(e)}")
-        return {"error": str(e)}
+        logger.info("AI reply processing completed", extra={"tenant_id": tenant_id})
