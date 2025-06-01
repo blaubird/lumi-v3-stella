@@ -1,18 +1,18 @@
 import os
 import logging
-from typing import List, Dict, Any
-from sqlalchemy.orm import Session
 from openai import AsyncOpenAI
 from db import get_db
 from models import Tenant, Message, Usage
-from ai import generate_embedding, find_relevant_faqs
+from ai import find_relevant_faqs
 from services.whatsapp import send_whatsapp_message
 from logging_utils import get_logger
 
 logger = get_logger(__name__)
+# Add specific logger for AI operations
+logger_ai = logging.getLogger("api.ai")
 
 # Get OpenAI model from environment
-OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4")
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "ft:gpt-4.1-nano-2025-04-14:luminiteq:flora:Bdezn8Rp")
 
 async def process_ai_reply(tenant_id: str, wa_msg_id: str, user_text: str):
     """
@@ -36,7 +36,7 @@ async def process_ai_reply(tenant_id: str, wa_msg_id: str, user_text: str):
         # Get tenant information
         tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
         if not tenant:
-            logger.error(f"Tenant not found", extra={"tenant_id": tenant_id})
+            logger.error("Tenant not found", extra={"tenant_id": tenant_id})
             return
         
         # Run embedding lookup and retrieve top-K FAQs
@@ -72,11 +72,13 @@ async def process_ai_reply(tenant_id: str, wa_msg_id: str, user_text: str):
         # Add current user message
         messages.append({"role": "user", "content": user_text})
         
+        logger_ai.info(f"Calling model {OPENAI_MODEL}")
+        
         logger.info("Calling OpenAI API", extra={
             "tenant_id": tenant_id,
             "model": OPENAI_MODEL,
             "message_count": len(messages),
-            "temperature": 0.2
+            "temperature": 0.4
         })
         
         # Call OpenAI API
@@ -86,55 +88,60 @@ async def process_ai_reply(tenant_id: str, wa_msg_id: str, user_text: str):
             return
             
         ai = AsyncOpenAI(api_key=api_key)
-        response = await ai.chat.completions.create(
-            model=OPENAI_MODEL,
-            messages=messages,
-            temperature=0.2
-        )
         
-        # Extract reply text and token count
-        reply_text = response.choices[0].message.content
-        token_count = response.usage.total_tokens
-        
-        logger.info("Received OpenAI response", extra={
-            "tenant_id": tenant_id,
-            "token_count": token_count,
-            "reply_length": len(reply_text)
-        })
-        
-        # Save bot message
-        bot_message = Message(
-            tenant_id=tenant_id,
-            role="bot",
-            text=reply_text,
-            tokens=token_count
-        )
-        db.add(bot_message)
-        
-        # Insert outbound usage record
-        usage_record = Usage(
-            tenant_id=tenant_id,
-            direction="outbound",
-            tokens=token_count
-        )
-        db.add(usage_record)
-        db.commit()
-        
-        # Get WhatsApp credentials from tenant
-        phone_id = os.getenv("WH_PHONE_ID", tenant.phone_id)
-        token = os.getenv("WH_TOKEN", tenant.wh_token)
-        
-        # Extract user phone from wa_msg_id (format: "phone:message_id")
-        user_phone = wa_msg_id.split(":")[0] if ":" in wa_msg_id else wa_msg_id
-        
-        # Send WhatsApp message
-        await send_whatsapp_message(phone_id, token, user_phone, reply_text)
-        
-        logger.info("WhatsApp message sent", extra={
-            "tenant_id": tenant_id,
-            "to": user_phone
-        })
-        
+        try:
+            response = await ai.chat.completions.create(
+                model=OPENAI_MODEL,
+                messages=messages,
+                temperature=0.4
+            )
+            
+            # Extract reply text and token count
+            reply_text = response.choices[0].message.content
+            token_count = response.usage.total_tokens
+            
+            logger.info("Received OpenAI response", extra={
+                "tenant_id": tenant_id,
+                "token_count": token_count,
+                "reply_length": len(reply_text)
+            })
+            
+            # Save bot message
+            bot_message = Message(
+                tenant_id=tenant_id,
+                role="bot",
+                text=reply_text,
+                tokens=token_count
+            )
+            db.add(bot_message)
+            
+            # Insert outbound usage record
+            usage_record = Usage(
+                tenant_id=tenant_id,
+                direction="outbound",
+                tokens=token_count
+            )
+            db.add(usage_record)
+            db.commit()
+            
+            # Get WhatsApp credentials from tenant
+            phone_id = os.getenv("WH_PHONE_ID", tenant.phone_id)
+            token = os.getenv("WH_TOKEN", tenant.wh_token)
+            
+            # Extract user phone from wa_msg_id (format: "phone:message_id")
+            user_phone = wa_msg_id.split(":")[0] if ":" in wa_msg_id else wa_msg_id
+            
+            # Send WhatsApp message
+            await send_whatsapp_message(phone_id, token, user_phone, reply_text)
+            
+            logger.info("WhatsApp message sent", extra={
+                "tenant_id": tenant_id,
+                "to": user_phone
+            })
+        except Exception as e:
+            logger_ai.error(f"OpenAI error: {e}")
+            return "Извините, временная ошибка. Попробуйте позже."
+            
     except Exception as e:
         logger.error("Error in process_ai_reply", extra={
             "tenant_id": tenant_id,
