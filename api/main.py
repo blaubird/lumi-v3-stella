@@ -1,9 +1,9 @@
+import os
+import logging
 from fastapi import FastAPI, Request, BackgroundTasks
 from fastapi.responses import HTMLResponse
 from fastapi.openapi.docs import get_swagger_ui_html
-import os
 import sys
-import logging
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 from db import get_db, engine, Base
@@ -30,6 +30,23 @@ for name in ("api", "hypercorn.access", "hypercorn.error", "sqlalchemy"):
     logging.getLogger(name).propagate = True
 
 logging.info("Starting application")
+
+# Check required environment variables
+required_env_vars = [
+    "OPENAI_API_KEY",
+    "OPENAI_MODEL",
+    "VERIFY_TOKEN",
+    "WH_TOKEN",
+    "WH_PHONE_ID",
+    "DATABASE_URL",
+    "X_ADMIN_TOKEN"
+]
+
+missing_vars = [var for var in required_env_vars if not os.getenv(var)]
+if missing_vars:
+    logging.error(f"Missing required environment variables: {', '.join(missing_vars)}")
+    logging.error("Please set these environment variables in Railway and restart the application")
+    sys.exit(1)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
