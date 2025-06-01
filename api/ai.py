@@ -1,4 +1,5 @@
 import os
+import logging
 from typing import Dict, Any, List, Optional
 from openai import AsyncOpenAI
 from sqlalchemy.orm import Session
@@ -7,6 +8,8 @@ from logging_utils import get_logger
 
 # Initialize logger
 logger = get_logger(__name__)
+# Add specific logger for AI operations
+logger_ai = logging.getLogger("api.ai")
 
 # Initialize OpenAI client
 client = None
@@ -19,7 +22,7 @@ except Exception as e:
 
 # Model names
 EMBEDDING_MODEL_NAME = "text-embedding-ada-002"
-COMPLETION_MODEL_NAME = "gpt-4o"
+MODEL_NAME = os.getenv("OPENAI_MODEL", "ft:gpt-4.1-nano-2025-04-14:luminiteq:flora:Bdezn8Rp")
 
 def track_openai_call(model: str, endpoint: str):
     """
@@ -138,7 +141,7 @@ async def find_relevant_faqs(db: Session, tenant_id: str, user_query: str, top_k
         }, exc_info=e)
         return []
 
-@track_openai_call(model="gpt-4o", endpoint="chat/completions")
+@track_openai_call(model=MODEL_NAME, endpoint="chat/completions")
 async def get_rag_response(db: Session, tenant_id: str, user_query: str, system_prompt: str) -> Dict[str, Any]:
     """
     Core RAG function:
@@ -173,16 +176,25 @@ async def get_rag_response(db: Session, tenant_id: str, user_query: str, system_
     # Construct the prompt for the LLM
     prompt = f"{system_prompt}\n\nContext from knowledge base:\n{context_str}\n\nUser Question: {user_query}\n\nAnswer:"
     
+    logger_ai.info(f"Calling model {MODEL_NAME}")
+    
     logger.debug("Constructed prompt for LLM", extra={
         "prompt_length": len(prompt),
         "faq_count": len(relevant_faqs)
     })
     
     # For now, we'll return a placeholder response that includes the context found
-    if not relevant_faqs:
-        llm_answer = f"I couldn't find specific information in our knowledge base for your question: '{user_query}'. Please try rephrasing or ask something else."
-    else:
-        llm_answer = f"Based on the information I found regarding '{user_query}':\n\n{context_str}\n\n(This is a conceptual answer. An actual LLM would synthesize this information to directly answer your question.)"
+    try:
+        # In a real implementation, this would be an actual OpenAI API call
+        # response = await openai.ChatCompletion.acreate(...)
+        
+        if not relevant_faqs:
+            llm_answer = f"I couldn't find specific information in our knowledge base for your question: '{user_query}'. Please try rephrasing or ask something else."
+        else:
+            llm_answer = f"Based on the information I found regarding '{user_query}':\n\n{context_str}\n\n(This is a conceptual answer. An actual LLM would synthesize this information to directly answer your question.)"
+    except Exception as e:
+        logger_ai.error(f"OpenAI error: {e}")
+        return "Извините, временная ошибка. Попробуйте позже."
     
     # Calculate token count (simplified estimation)
     # In a real implementation, this would come from the OpenAI API response
