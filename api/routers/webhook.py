@@ -1,7 +1,8 @@
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, Query
 from sqlalchemy.orm import Session
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 import json
+import os
 from db import get_db
 from models import Tenant, Message, Usage
 from services.whatsapp import WhatsAppService
@@ -14,32 +15,31 @@ logger = get_logger(__name__)
 router = APIRouter(prefix="/webhook", tags=["Webhook"])
 
 @router.get("/")
-async def verify_webhook(request: Request, db: Session = Depends(get_db)):
+async def verify_webhook(
+    mode: str = Query(None, alias="hub.mode"),
+    challenge: str = Query(None, alias="hub.challenge"),
+    verify_token: str = Query(None, alias="hub.verify_token")
+):
     """
-    Verify webhook endpoint for WhatsApp Business API
+    Verify webhook endpoint for WhatsApp Business API using Meta's verification flow
     """
-    # Get query parameters
-    params = dict(request.query_params)
-    mode = params.get("hub.mode")
-    token = params.get("hub.verify_token")
-    challenge = params.get("hub.challenge")
-    
     logger.info("Webhook verification request received", extra={
         "mode": mode,
-        "token_provided": bool(token)
+        "token_provided": bool(verify_token)
     })
     
+    # Get expected token from environment
+    expected_token = os.getenv("VERIFY_TOKEN", "lumi-verify-6969")
+    
     # Check mode and token
-    if mode == "subscribe" and token:
-        # Get tenant by token
-        tenant = db.query(Tenant).filter(Tenant.wh_token == token).first()
-        if tenant:
-            logger.info("Webhook verified successfully", extra={"tenant_id": tenant.id})
-            return int(challenge) if challenge else "WEBHOOK_VERIFIED"
+    if mode == "subscribe" and verify_token == expected_token:
+        logger.info("Webhook verified successfully")
+        # Return raw challenge as plain text
+        return Response(content=challenge, media_type="text/plain")
     
     # Invalid verification
     logger.warning("Invalid webhook verification attempt")
-    raise HTTPException(status_code=403, detail="Verification failed")
+    return Response(content="Verification failed", status_code=403, media_type="text/plain")
 
 @router.post("/")
 async def webhook_handler(request: Request, db: Session = Depends(get_db)):
