@@ -30,7 +30,7 @@ class Message(Base):
     __tablename__ = "messages"
     
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
-    tenant_id = Column(String, ForeignKey("tenants.id"), nullable=False, index=True)
+    tenant_id = Column(String, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
     wa_msg_id = Column(String, nullable=True, unique=True)
     role = Column(Enum("user", "bot", name="role_enum"), nullable=False)
     text = Column(Text, nullable=False)
@@ -44,7 +44,7 @@ class FAQ(Base):
     __tablename__ = "faqs"
     
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
-    tenant_id = Column(String, ForeignKey("tenants.id"), nullable=False, index=True)
+    tenant_id = Column(String, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
     question = Column(Text, nullable=False)
     answer = Column(Text, nullable=False)
     # Only define embedding column if pgvector is available
@@ -62,7 +62,7 @@ class Usage(Base):
     __tablename__ = "usage"
     
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
-    tenant_id = Column(String, ForeignKey("tenants.id"), nullable=False, index=True)
+    tenant_id = Column(String, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
     direction = Column(Enum("inbound", "outbound", name="direction_enum"), nullable=False)
     tokens = Column(Integer, nullable=False)
     msg_ts = Column(TIMESTAMP, nullable=False, server_default=func.now())
