@@ -143,22 +143,7 @@ async def delete_tenant(tenant_id: str, db: Session = Depends(get_db)):
             logger.warning("Tenant not found for deletion", extra={"tenant_id": tenant_id})
             raise HTTPException(status_code=404, detail="Tenant not found")
         
-        # Delete related records first to avoid foreign key constraint errors
-        logger.info("Deleting related records for tenant", extra={"tenant_id": tenant_id})
-        
-        # Delete FAQs
-        db.query(FAQ).filter(FAQ.tenant_id == tenant_id).delete()
-        
-        # Delete Messages
-        db.query(Message).filter(Message.tenant_id == tenant_id).delete()
-        
-        # Delete Usage
-        db.query(Usage).filter(Usage.tenant_id == tenant_id).delete()
-        
-        # Commit the deletion of related records
-        db.commit()
-        
-        # Now delete the tenant
+        # Delete the tenant - child records will be deleted automatically via CASCADE
         db.delete(tenant)
         db.commit()
         
@@ -391,39 +376,23 @@ async def bulk_import_faq(
         raise HTTPException(status_code=500, detail="Internal server error during bulk FAQ import")
 
 async def generate_embedding_for_faq(db: Session, faq_id: int, tenant_id: str, question: str, answer: str):
-    """
-    Generate embedding for a FAQ and update the database
-    """
+    """Background task to generate embedding for FAQ"""
     try:
-        # Get the FAQ from the database
+        # Get the FAQ
         faq = db.query(FAQ).filter(FAQ.id == faq_id).first()
         if not faq:
-            logger.error("FAQ not found for embedding generation", extra={
-                "faq_id": faq_id,
-                "tenant_id": tenant_id
-            })
+            logger.error("FAQ not found for embedding generation", extra={"faq_id": faq_id, "tenant_id": tenant_id})
             return
         
         # Generate embedding
-        content_to_embed = f"Question: {question} Answer: {answer}"
-        embedding = await generate_embedding(content_to_embed)
-        
-        if embedding is None:
-            logger.error("Failed to generate embedding for FAQ", extra={
-                "faq_id": faq_id,
-                "tenant_id": tenant_id
-            })
-            return
+        combined_text = f"Question: {question}\nAnswer: {answer}"
+        embedding = await generate_embedding(combined_text)
         
         # Update FAQ with embedding
         faq.embedding = embedding
         db.commit()
         
-        logger.info("Embedding generated for FAQ", extra={
-            "faq_id": faq_id,
-            "tenant_id": tenant_id,
-            "embedding_dimensions": len(embedding)
-        })
+        logger.info("Embedding generated for FAQ", extra={"faq_id": faq_id, "tenant_id": tenant_id})
     except Exception as e:
         logger.error("Error generating embedding for FAQ", extra={
             "faq_id": faq_id,
