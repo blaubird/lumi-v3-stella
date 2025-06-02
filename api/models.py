@@ -20,8 +20,6 @@ class Tenant(Base):
     phone_id = Column(String, nullable=False, unique=True, index=True)
     wh_token = Column(Text, nullable=False)
     system_prompt = Column(Text, nullable=False, server_default="You are a helpful assistant.")
-    created_at = Column(TIMESTAMP, nullable=False, server_default=func.now())
-    updated_at = Column(TIMESTAMP, nullable=False, server_default=func.now(), onupdate=func.now())
     
     # Relationships
     messages = relationship("Message", back_populates="tenant")
