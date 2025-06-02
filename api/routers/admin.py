@@ -58,9 +58,8 @@ async def create_tenant(tenant: TenantCreate, db: Session = Depends(get_db)):
             logger.warning("Tenant creation failed: phone_id already exists", extra={"phone_id": tenant.phone_id})
             raise HTTPException(status_code=400, detail="Phone ID already exists")
         
-        # Generate a unique ID for the tenant
-        import uuid
-        tenant_id = str(uuid.uuid4())
+        # Use the ID from the request instead of generating a new UUID
+        tenant_id = tenant.id
         
         # Create new tenant
         db_tenant = Tenant(
@@ -80,6 +79,7 @@ async def create_tenant(tenant: TenantCreate, db: Session = Depends(get_db)):
     except Exception as e:
         logger.error("Error creating tenant", extra={"error": str(e)}, exc_info=e)
         raise HTTPException(status_code=500, detail="Internal server error while creating tenant")
+
 
 @router.get("/tenants/{tenant_id}", response_model=TenantResponse, dependencies=[Depends(verify_admin_token)])
 async def get_tenant(tenant_id: str, db: Session = Depends(get_db)):
