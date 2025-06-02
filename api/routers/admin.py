@@ -27,13 +27,26 @@ async def get_tenants(
 ):
     """Get all tenants with pagination and ordering"""
     try:
+        logger.info("Starting tenant retrieval", extra={"page": page, "page_size": page_size})
+        
         offset = (page - 1) * page_size
-        tenants = db.query(Tenant).order_by(Tenant.id.desc()).offset(offset).limit(page_size).all()
-        logger.info("Retrieved tenants", extra={"page": page, "page_size": page_size, "count": len(tenants)})
+        
+        # Use only id for ordering to avoid any potential issues with timestamps
+        query = db.query(Tenant).order_by(Tenant.id.desc())
+        
+        # Log the query being executed
+        logger.info(f"Executing query: {str(query)}")
+        
+        tenants = query.offset(offset).limit(page_size).all()
+        
+        # Log successful retrieval
+        logger.info("Successfully retrieved tenants", extra={"page": page, "page_size": page_size, "count": len(tenants)})
+        
         return tenants
     except Exception as e:
-        logger.error("Error retrieving tenants", extra={"error": str(e)}, exc_info=e)
-        raise HTTPException(status_code=500, detail="Internal server error while retrieving tenants")
+        logger.error("Error retrieving tenants", extra={"error": str(e), "page": page, "page_size": page_size}, exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Internal server error while retrieving tenants: {str(e)}")
+
 
 @router.post("/tenants", response_model=TenantResponse, dependencies=[Depends(verify_admin_token)])
 async def create_tenant(tenant: TenantCreate, db: Session = Depends(get_db)):
