@@ -143,7 +143,22 @@ async def delete_tenant(tenant_id: str, db: Session = Depends(get_db)):
             logger.warning("Tenant not found for deletion", extra={"tenant_id": tenant_id})
             raise HTTPException(status_code=404, detail="Tenant not found")
         
-        # Delete tenant
+        # Delete related records first to avoid foreign key constraint errors
+        logger.info("Deleting related records for tenant", extra={"tenant_id": tenant_id})
+        
+        # Delete FAQs
+        db.query(FAQ).filter(FAQ.tenant_id == tenant_id).delete()
+        
+        # Delete Messages
+        db.query(Message).filter(Message.tenant_id == tenant_id).delete()
+        
+        # Delete Usage
+        db.query(Usage).filter(Usage.tenant_id == tenant_id).delete()
+        
+        # Commit the deletion of related records
+        db.commit()
+        
+        # Now delete the tenant
         db.delete(tenant)
         db.commit()
         
@@ -152,8 +167,9 @@ async def delete_tenant(tenant_id: str, db: Session = Depends(get_db)):
     except HTTPException:
         raise
     except Exception as e:
-        logger.error("Error deleting tenant", extra={"tenant_id": tenant_id, "error": str(e)}, exc_info=e)
+        logger.error("Error deleting tenant", extra={"tenant_id": tenant_id, "error": str(e)}, exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error while deleting tenant")
+
 
 @router.get("/tenants/{tenant_id}/messages", response_model=List[MessageResponse], dependencies=[Depends(verify_admin_token)])
 async def get_tenant_messages(
