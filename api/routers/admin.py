@@ -20,94 +20,127 @@ logger = get_logger(__name__)
 router = APIRouter(prefix="/admin", tags=["Admin"])
 
 @router.get("/tenants", response_model=List[TenantResponse], dependencies=[Depends(verify_admin_token)])
-async def get_tenants(db: Session = Depends(get_db)):
-    """Get all tenants"""
-    tenants = db.query(Tenant).all()
-    logger.info("Retrieved all tenants", extra={"count": len(tenants)})
-    return tenants
+async def get_tenants(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(5, ge=1, le=100),
+    db: Session = Depends(get_db)
+):
+    """Get all tenants with pagination and ordering"""
+    try:
+        offset = (page - 1) * page_size
+        tenants = db.query(Tenant).order_by(Tenant.id.desc()).offset(offset).limit(page_size).all()
+        logger.info("Retrieved tenants", extra={"page": page, "page_size": page_size, "count": len(tenants)})
+        return tenants
+    except Exception as e:
+        logger.error("Error retrieving tenants", extra={"error": str(e)}, exc_info=e)
+        raise HTTPException(status_code=500, detail="Internal server error while retrieving tenants")
 
 @router.post("/tenants", response_model=TenantResponse, dependencies=[Depends(verify_admin_token)])
 async def create_tenant(tenant: TenantCreate, db: Session = Depends(get_db)):
     """Create a new tenant"""
-    # Check if phone_id already exists
-    existing = db.query(Tenant).filter(Tenant.phone_id == tenant.phone_id).first()
-    if existing:
-        logger.warning("Tenant creation failed: phone_id already exists", extra={"phone_id": tenant.phone_id})
-        raise HTTPException(status_code=400, detail="Phone ID already exists")
-    
-    # Generate a unique ID for the tenant
-    import uuid
-    tenant_id = str(uuid.uuid4())
-    
-    # Create new tenant
-    db_tenant = Tenant(
-        id=tenant_id,
-        phone_id=tenant.phone_id,
-        wh_token=tenant.wh_token,
-        system_prompt=tenant.system_prompt
-    )
-    db.add(db_tenant)
-    db.commit()
-    db.refresh(db_tenant)
-    
-    logger.info("Tenant created", extra={"tenant_id": tenant_id})
-    return db_tenant
+    try:
+        # Check if phone_id already exists
+        existing = db.query(Tenant).filter(Tenant.phone_id == tenant.phone_id).first()
+        if existing:
+            logger.warning("Tenant creation failed: phone_id already exists", extra={"phone_id": tenant.phone_id})
+            raise HTTPException(status_code=400, detail="Phone ID already exists")
+        
+        # Generate a unique ID for the tenant
+        import uuid
+        tenant_id = str(uuid.uuid4())
+        
+        # Create new tenant
+        db_tenant = Tenant(
+            id=tenant_id,
+            phone_id=tenant.phone_id,
+            wh_token=tenant.wh_token,
+            system_prompt=tenant.system_prompt
+        )
+        db.add(db_tenant)
+        db.commit()
+        db.refresh(db_tenant)
+        
+        logger.info("Tenant created", extra={"tenant_id": tenant_id})
+        return db_tenant
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Error creating tenant", extra={"error": str(e)}, exc_info=e)
+        raise HTTPException(status_code=500, detail="Internal server error while creating tenant")
 
 @router.get("/tenants/{tenant_id}", response_model=TenantResponse, dependencies=[Depends(verify_admin_token)])
 async def get_tenant(tenant_id: str, db: Session = Depends(get_db)):
     """Get a specific tenant by ID"""
-    tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
-    if not tenant:
-        logger.warning("Tenant not found", extra={"tenant_id": tenant_id})
-        raise HTTPException(status_code=404, detail="Tenant not found")
-    
-    logger.info("Retrieved tenant", extra={"tenant_id": tenant_id})
-    return tenant
+    try:
+        tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
+        if not tenant:
+            logger.warning("Tenant not found", extra={"tenant_id": tenant_id})
+            raise HTTPException(status_code=404, detail="Tenant not found")
+        
+        logger.info("Retrieved tenant", extra={"tenant_id": tenant_id})
+        return tenant
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Error retrieving tenant", extra={"tenant_id": tenant_id, "error": str(e)}, exc_info=e)
+        raise HTTPException(status_code=500, detail="Internal server error while retrieving tenant")
 
 @router.put("/tenants/{tenant_id}", response_model=TenantResponse, dependencies=[Depends(verify_admin_token)])
 async def update_tenant(tenant_id: str, tenant: TenantUpdate, db: Session = Depends(get_db)):
     """Update a tenant"""
-    db_tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
-    if not db_tenant:
-        logger.warning("Tenant not found for update", extra={"tenant_id": tenant_id})
-        raise HTTPException(status_code=404, detail="Tenant not found")
-    
-    # Update fields if provided
-    if tenant.phone_id is not None:
-        # Check if new phone_id already exists
-        if tenant.phone_id != db_tenant.phone_id:
-            existing = db.query(Tenant).filter(Tenant.phone_id == tenant.phone_id).first()
-            if existing:
-                logger.warning("Tenant update failed: phone_id already exists", extra={"phone_id": tenant.phone_id})
-                raise HTTPException(status_code=400, detail="Phone ID already exists")
-        db_tenant.phone_id = tenant.phone_id
-    
-    if tenant.wh_token is not None:
-        db_tenant.wh_token = tenant.wh_token
-    
-    if tenant.system_prompt is not None:
-        db_tenant.system_prompt = tenant.system_prompt
-    
-    db.commit()
-    db.refresh(db_tenant)
-    
-    logger.info("Tenant updated", extra={"tenant_id": tenant_id})
-    return db_tenant
+    try:
+        db_tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
+        if not db_tenant:
+            logger.warning("Tenant not found for update", extra={"tenant_id": tenant_id})
+            raise HTTPException(status_code=404, detail="Tenant not found")
+        
+        # Update fields if provided
+        if tenant.phone_id is not None:
+            # Check if new phone_id already exists
+            if tenant.phone_id != db_tenant.phone_id:
+                existing = db.query(Tenant).filter(Tenant.phone_id == tenant.phone_id).first()
+                if existing:
+                    logger.warning("Tenant update failed: phone_id already exists", extra={"phone_id": tenant.phone_id})
+                    raise HTTPException(status_code=400, detail="Phone ID already exists")
+            db_tenant.phone_id = tenant.phone_id
+        
+        if tenant.wh_token is not None:
+            db_tenant.wh_token = tenant.wh_token
+        
+        if tenant.system_prompt is not None:
+            db_tenant.system_prompt = tenant.system_prompt
+        
+        db.commit()
+        db.refresh(db_tenant)
+        
+        logger.info("Tenant updated", extra={"tenant_id": tenant_id})
+        return db_tenant
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Error updating tenant", extra={"tenant_id": tenant_id, "error": str(e)}, exc_info=e)
+        raise HTTPException(status_code=500, detail="Internal server error while updating tenant")
 
 @router.delete("/tenants/{tenant_id}", dependencies=[Depends(verify_admin_token)])
 async def delete_tenant(tenant_id: str, db: Session = Depends(get_db)):
     """Delete a tenant"""
-    tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
-    if not tenant:
-        logger.warning("Tenant not found for deletion", extra={"tenant_id": tenant_id})
-        raise HTTPException(status_code=404, detail="Tenant not found")
-    
-    # Delete tenant
-    db.delete(tenant)
-    db.commit()
-    
-    logger.info("Tenant deleted", extra={"tenant_id": tenant_id})
-    return {"status": "success", "message": f"Tenant {tenant_id} deleted"}
+    try:
+        tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
+        if not tenant:
+            logger.warning("Tenant not found for deletion", extra={"tenant_id": tenant_id})
+            raise HTTPException(status_code=404, detail="Tenant not found")
+        
+        # Delete tenant
+        db.delete(tenant)
+        db.commit()
+        
+        logger.info("Tenant deleted", extra={"tenant_id": tenant_id})
+        return {"status": "success", "message": f"Tenant {tenant_id} deleted"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Error deleting tenant", extra={"tenant_id": tenant_id, "error": str(e)}, exc_info=e)
+        raise HTTPException(status_code=500, detail="Internal server error while deleting tenant")
 
 @router.get("/tenants/{tenant_id}/messages", response_model=List[MessageResponse], dependencies=[Depends(verify_admin_token)])
 async def get_tenant_messages(
@@ -117,32 +150,44 @@ async def get_tenant_messages(
     db: Session = Depends(get_db)
 ):
     """Get messages for a specific tenant"""
-    tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
-    if not tenant:
-        logger.warning("Tenant not found for message retrieval", extra={"tenant_id": tenant_id})
-        raise HTTPException(status_code=404, detail="Tenant not found")
-    
-    messages = db.query(Message).filter(
-        Message.tenant_id == tenant_id
-    ).order_by(
-        Message.ts.desc()
-    ).offset(offset).limit(limit).all()
-    
-    logger.info("Retrieved messages for tenant", extra={"tenant_id": tenant_id, "count": len(messages)})
-    return messages
+    try:
+        tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
+        if not tenant:
+            logger.warning("Tenant not found for message retrieval", extra={"tenant_id": tenant_id})
+            raise HTTPException(status_code=404, detail="Tenant not found")
+        
+        messages = db.query(Message).filter(
+            Message.tenant_id == tenant_id
+        ).order_by(
+            Message.ts.desc()
+        ).offset(offset).limit(limit).all()
+        
+        logger.info("Retrieved messages for tenant", extra={"tenant_id": tenant_id, "count": len(messages)})
+        return messages
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Error retrieving tenant messages", extra={"tenant_id": tenant_id, "error": str(e)}, exc_info=e)
+        raise HTTPException(status_code=500, detail="Internal server error while retrieving tenant messages")
 
 @router.get("/tenants/{tenant_id}/faqs", response_model=List[FAQResponse], dependencies=[Depends(verify_admin_token)])
 async def get_tenant_faqs(tenant_id: str, db: Session = Depends(get_db)):
     """Get FAQs for a specific tenant"""
-    tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
-    if not tenant:
-        logger.warning("Tenant not found for FAQ retrieval", extra={"tenant_id": tenant_id})
-        raise HTTPException(status_code=404, detail="Tenant not found")
-    
-    faqs = db.query(FAQ).filter(FAQ.tenant_id == tenant_id).all()
-    
-    logger.info("Retrieved FAQs for tenant", extra={"tenant_id": tenant_id, "count": len(faqs)})
-    return faqs
+    try:
+        tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
+        if not tenant:
+            logger.warning("Tenant not found for FAQ retrieval", extra={"tenant_id": tenant_id})
+            raise HTTPException(status_code=404, detail="Tenant not found")
+        
+        faqs = db.query(FAQ).filter(FAQ.tenant_id == tenant_id).all()
+        
+        logger.info("Retrieved FAQs for tenant", extra={"tenant_id": tenant_id, "count": len(faqs)})
+        return faqs
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Error retrieving tenant FAQs", extra={"tenant_id": tenant_id, "error": str(e)}, exc_info=e)
+        raise HTTPException(status_code=500, detail="Internal server error while retrieving tenant FAQs")
 
 @router.post("/tenants/{tenant_id}/faqs", response_model=FAQResponse, dependencies=[Depends(verify_admin_token)])
 async def create_faq(
@@ -152,39 +197,45 @@ async def create_faq(
     db: Session = Depends(get_db)
 ):
     """Create a new FAQ for a tenant"""
-    tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
-    if not tenant:
-        logger.warning("Tenant not found for FAQ creation", extra={"tenant_id": tenant_id})
-        raise HTTPException(status_code=404, detail="Tenant not found")
-    
-    # Create new FAQ without embedding initially
-    db_faq = FAQ(
-        tenant_id=tenant_id,
-        question=faq.question,
-        answer=faq.answer
-    )
-    db.add(db_faq)
-    db.commit()
-    db.refresh(db_faq)
-    
-    # Generate embedding in background
-    background_tasks.add_task(
-        generate_embedding_for_faq,
-        db=db,
-        faq_id=db_faq.id,
-        tenant_id=tenant_id,
-        question=faq.question,
-        answer=faq.answer
-    )
-    
-    logger.info("FAQ created", extra={
-        "faq_id": db_faq.id,
-        "tenant_id": tenant_id,
-        "question_length": len(faq.question),
-        "answer_length": len(faq.answer)
-    })
-    
-    return db_faq
+    try:
+        tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
+        if not tenant:
+            logger.warning("Tenant not found for FAQ creation", extra={"tenant_id": tenant_id})
+            raise HTTPException(status_code=404, detail="Tenant not found")
+        
+        # Create new FAQ without embedding initially
+        db_faq = FAQ(
+            tenant_id=tenant_id,
+            question=faq.question,
+            answer=faq.answer
+        )
+        db.add(db_faq)
+        db.commit()
+        db.refresh(db_faq)
+        
+        # Generate embedding in background
+        background_tasks.add_task(
+            generate_embedding_for_faq,
+            db=db,
+            faq_id=db_faq.id,
+            tenant_id=tenant_id,
+            question=faq.question,
+            answer=faq.answer
+        )
+        
+        logger.info("FAQ created", extra={
+            "faq_id": db_faq.id,
+            "tenant_id": tenant_id,
+            "question_length": len(faq.question),
+            "answer_length": len(faq.answer)
+        })
+        
+        return db_faq
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Error creating FAQ", extra={"tenant_id": tenant_id, "error": str(e)}, exc_info=e)
+        raise HTTPException(status_code=500, detail="Internal server error while creating FAQ")
 
 @router.get("/tenants/{tenant_id}/usage", response_model=UsageStatsResponse, dependencies=[Depends(verify_admin_token)])
 async def get_tenant_usage(
@@ -194,42 +245,48 @@ async def get_tenant_usage(
     db: Session = Depends(get_db)
 ):
     """Get usage statistics for a specific tenant"""
-    tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
-    if not tenant:
-        logger.warning("Tenant not found for usage retrieval", extra={"tenant_id": tenant_id})
-        raise HTTPException(status_code=404, detail="Tenant not found")
-    
-    # Get paginated usage items
-    usage_items = db.query(Usage).filter(
-        Usage.tenant_id == tenant_id
-    ).order_by(
-        Usage.msg_ts.desc()
-    ).offset(offset).limit(limit).all()
-    
-    # Get total inbound tokens
-    total_inbound = db.query(func.sum(Usage.tokens)).filter(
-        Usage.tenant_id == tenant_id,
-        Usage.direction == "inbound"
-    ).scalar() or 0
-    
-    # Get total outbound tokens
-    total_outbound = db.query(func.sum(Usage.tokens)).filter(
-        Usage.tenant_id == tenant_id,
-        Usage.direction == "outbound"
-    ).scalar() or 0
-    
-    logger.info("Retrieved usage for tenant", extra={
-        "tenant_id": tenant_id,
-        "items_count": len(usage_items),
-        "total_inbound": total_inbound,
-        "total_outbound": total_outbound
-    })
-    
-    return {
-        "items": usage_items,
-        "total_inbound_tokens": total_inbound,
-        "total_outbound_tokens": total_outbound
-    }
+    try:
+        tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
+        if not tenant:
+            logger.warning("Tenant not found for usage retrieval", extra={"tenant_id": tenant_id})
+            raise HTTPException(status_code=404, detail="Tenant not found")
+        
+        # Get paginated usage items
+        usage_items = db.query(Usage).filter(
+            Usage.tenant_id == tenant_id
+        ).order_by(
+            Usage.msg_ts.desc()
+        ).offset(offset).limit(limit).all()
+        
+        # Get total inbound tokens
+        total_inbound = db.query(func.sum(Usage.tokens)).filter(
+            Usage.tenant_id == tenant_id,
+            Usage.direction == "inbound"
+        ).scalar() or 0
+        
+        # Get total outbound tokens
+        total_outbound = db.query(func.sum(Usage.tokens)).filter(
+            Usage.tenant_id == tenant_id,
+            Usage.direction == "outbound"
+        ).scalar() or 0
+        
+        logger.info("Retrieved usage for tenant", extra={
+            "tenant_id": tenant_id,
+            "items_count": len(usage_items),
+            "total_inbound": total_inbound,
+            "total_outbound": total_outbound
+        })
+        
+        return {
+            "items": usage_items,
+            "total_inbound_tokens": total_inbound,
+            "total_outbound_tokens": total_outbound
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Error retrieving tenant usage", extra={"tenant_id": tenant_id, "error": str(e)}, exc_info=e)
+        raise HTTPException(status_code=500, detail="Internal server error while retrieving tenant usage")
 
 @router.post("/tenants/{tenant_id}/faqs/bulk", response_model=BulkFAQImportResponse, dependencies=[Depends(verify_admin_token)])
 async def bulk_import_faq(
@@ -241,62 +298,68 @@ async def bulk_import_faq(
     """
     Bulk import multiple FAQ entries for a tenant
     """
-    # Verify tenant exists
-    tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
-    if not tenant:
-        logger.warning("Tenant not found for bulk FAQ import", extra={"tenant_id": tenant_id})
-        raise HTTPException(status_code=404, detail=f"Tenant with id {tenant_id} not found.")
-    
-    successful_items = 0
-    failed_items = 0
-    errors = []
-    
-    # Process each FAQ item
-    for item in import_data.items:
-        try:
-            # Create FAQ without embedding initially
-            db_faq = FAQ(
-                tenant_id=tenant_id,
-                question=item.question,
-                answer=item.answer
-            )
-            db.add(db_faq)
-            db.commit()
-            db.refresh(db_faq)
-            
-            # Schedule embedding generation in background
-            background_tasks.add_task(
-                generate_embedding_for_faq,
-                db=db,
-                faq_id=db_faq.id,
-                tenant_id=tenant_id,
-                question=item.question,
-                answer=item.answer
-            )
-            
-            successful_items += 1
-        except Exception as e:
-            failed_items += 1
-            errors.append(f"Error processing FAQ: {str(e)}")
-            logger.error("Error in bulk FAQ import", extra={
-                "tenant_id": tenant_id,
-                "question": item.question[:50],
-                "error": str(e)
-            }, exc_info=e)
-    
-    logger.info("Bulk FAQ import completed", extra={
-        "tenant_id": tenant_id,
-        "total_items": len(import_data.items),
-        "successful_items": successful_items,
-        "failed_items": failed_items
-    })
-    
-    return {
-        "total_items": len(import_data.items),
-        "successful_items": successful_items,
-        "failed_items": failed_items,
-        "errors": errors if errors else None
-    }
+    try:
+        # Verify tenant exists
+        tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
+        if not tenant:
+            logger.warning("Tenant not found for bulk FAQ import", extra={"tenant_id": tenant_id})
+            raise HTTPException(status_code=404, detail=f"Tenant with id {tenant_id} not found.")
+        
+        successful_items = 0
+        failed_items = 0
+        errors = []
+        
+        # Process each FAQ item
+        for item in import_data.items:
+            try:
+                # Create FAQ without embedding initially
+                db_faq = FAQ(
+                    tenant_id=tenant_id,
+                    question=item.question,
+                    answer=item.answer
+                )
+                db.add(db_faq)
+                db.commit()
+                db.refresh(db_faq)
+                
+                # Schedule embedding generation in background
+                background_tasks.add_task(
+                    generate_embedding_for_faq,
+                    db=db,
+                    faq_id=db_faq.id,
+                    tenant_id=tenant_id,
+                    question=item.question,
+                    answer=item.answer
+                )
+                
+                successful_items += 1
+            except Exception as e:
+                failed_items += 1
+                errors.append(f"Error processing FAQ: {str(e)}")
+                logger.error("Error in bulk FAQ import", extra={
+                    "tenant_id": tenant_id,
+                    "question": item.question[:50],
+                    "error": str(e)
+                }, exc_info=e)
+        
+        logger.info("Bulk FAQ import completed", extra={
+            "tenant_id": tenant_id,
+            "total_items": len(import_data.items),
+            "successful_items": successful_items,
+            "failed_items": failed_items
+        })
+        
+        return {
+            "total_items": len(import_data.items),
+            "successful_items": successful_items,
+            "failed_items": failed_items,
+            "errors": errors if errors else None
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Error in bulk FAQ import", extra={"tenant_id": tenant_id, "error": str(e)}, exc_info=e)
+        raise HTTPException(status_code=500, detail="Internal server error during bulk FAQ import")
 
 async def generate_embedding_for_faq(db: Session, faq_id: int, tenant_id: str, question: str, answer: str):
     """
