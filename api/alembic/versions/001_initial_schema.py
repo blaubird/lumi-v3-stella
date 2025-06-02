@@ -89,7 +89,7 @@ def upgrade():
         sa.Column('text', sa.Text(), nullable=False),
         sa.Column('tokens', sa.Integer(), nullable=True),
         sa.Column('ts', sa.TIMESTAMP(), server_default=sa.func.now(), nullable=False),
-        sa.ForeignKeyConstraint(['tenant_id'], ['tenants.id'], ),
+        sa.ForeignKeyConstraint(['tenant_id'], ['tenants.id'], ondelete='CASCADE'),
         sa.PrimaryKeyConstraint('id'),
         sa.UniqueConstraint('wa_msg_id')
     )
@@ -105,7 +105,7 @@ def upgrade():
         sa.Column('embedding', Vector(1536), nullable=True),
         sa.Column('created_at', sa.TIMESTAMP(), server_default=sa.text('now()'), nullable=False),
         sa.Column('updated_at', sa.TIMESTAMP(), server_default=sa.text('now()'), nullable=False),
-        sa.ForeignKeyConstraint(['tenant_id'], ['tenants.id'], ),
+        sa.ForeignKeyConstraint(['tenant_id'], ['tenants.id'], ondelete='CASCADE'),
         sa.PrimaryKeyConstraint('id')
     )
     op.create_index(op.f('ix_faqs_tenant_id'), 'faqs', ['tenant_id'], unique=False)
@@ -127,7 +127,7 @@ def upgrade():
         sa.Column('direction', sa.Enum('inbound', 'outbound', name='direction_enum'), nullable=False),
         sa.Column('tokens', sa.Integer(), nullable=False),
         sa.Column('msg_ts', sa.TIMESTAMP(), server_default=sa.func.now(), nullable=False),
-        sa.ForeignKeyConstraint(['tenant_id'], ['tenants.id'], ),
+        sa.ForeignKeyConstraint(['tenant_id'], ['tenants.id'], ondelete='CASCADE'),
         sa.PrimaryKeyConstraint('id')
     )
     op.create_index(op.f('ix_usage_tenant_id'), 'usage', ['tenant_id'], unique=False)
