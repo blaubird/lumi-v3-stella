@@ -8,7 +8,7 @@ class TenantBase(BaseModel):
     system_prompt: str
 
 class TenantCreate(TenantBase):
-    pass
+    id: str
 
 class TenantUpdate(BaseModel):
     phone_id: Optional[str] = None
