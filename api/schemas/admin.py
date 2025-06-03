@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import Optional, List
+from typing import Optional, List, Any
 from datetime import datetime
 
 class TenantBase(BaseModel):
@@ -31,7 +31,7 @@ class FAQCreate(FAQBase):
 class FAQResponse(FAQBase):
     id: int
     tenant_id: str
-    embedding: Optional[str] = None
+    embedding: Optional[Any] = None
     
     model_config = {'from_attributes': True}
 
