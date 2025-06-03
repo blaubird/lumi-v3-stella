@@ -203,7 +203,7 @@ async def get_tenant_faqs(tenant_id: str, db: Session = Depends(get_db)):
         logger.error("Error retrieving tenant FAQs", extra={"tenant_id": tenant_id, "error": str(e)}, exc_info=e)
         raise HTTPException(status_code=500, detail="Internal server error while retrieving tenant FAQs")
 
-@router.post("/tenants/{tenant_id}/faq", response_model=FAQResponse, dependencies=[Depends(verify_admin_token)])
+@router.post("/tenants/{tenant_id}/faqs", response_model=FAQResponse, dependencies=[Depends(verify_admin_token)])
 async def create_faq(
     tenant_id: str, 
     faq: FAQCreate, 
@@ -392,8 +392,7 @@ async def generate_embedding_for_faq(db: Session, faq_id: int, tenant_id: str, q
             return
         
         # Generate embedding
-        combined_text = f"Question: {question}\nAnswer: {answer}"
-        embedding = await generate_embedding(combined_text)
+        embedding = await generate_embedding(question, answer)
         
         # Update FAQ with embedding
         faq.embedding = embedding
