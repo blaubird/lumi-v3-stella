@@ -203,7 +203,7 @@ async def get_tenant_faqs(tenant_id: str, db: Session = Depends(get_db)):
         logger.error("Error retrieving tenant FAQs", extra={"tenant_id": tenant_id, "error": str(e)}, exc_info=e)
         raise HTTPException(status_code=500, detail="Internal server error while retrieving tenant FAQs")
 
-@router.post("/tenants/{tenant_id}/faqs", response_model=FAQResponse, dependencies=[Depends(verify_admin_token)])
+@router.post("/tenants/{tenant_id}/faq", response_model=FAQResponse, dependencies=[Depends(verify_admin_token)])
 async def create_faq(
     tenant_id: str, 
     faq: FAQCreate, 
@@ -217,15 +217,22 @@ async def create_faq(
             logger.warning("Tenant not found for FAQ creation", extra={"tenant_id": tenant_id})
             raise HTTPException(status_code=404, detail="Tenant not found")
         
-        # Create new FAQ without embedding initially
-        db_faq = FAQ(
-            tenant_id=tenant_id,
-            question=faq.question,
-            answer=faq.answer
-        )
-        db.add(db_faq)
-        db.commit()
-        db.refresh(db_faq)
+        try:
+            # Create new FAQ without embedding initially
+            db_faq = FAQ(
+                tenant_id=tenant_id,
+                question=faq.question,
+                answer=faq.answer
+            )
+            db.add(db_faq)
+            db.commit()
+            db.refresh(db_faq)
+        except Exception as db_error:
+            logger.error("Database error creating FAQ", extra={
+                "tenant_id": tenant_id,
+                "error": str(db_error)
+            }, exc_info=db_error)
+            raise HTTPException(status_code=400, detail=f"Error creating FAQ: {str(db_error)}")
         
         # Generate embedding in background
         background_tasks.add_task(
@@ -249,7 +256,7 @@ async def create_faq(
         raise
     except Exception as e:
         logger.error("Error creating FAQ", extra={"tenant_id": tenant_id, "error": str(e)}, exc_info=e)
-        raise HTTPException(status_code=500, detail="Internal server error while creating FAQ")
+        raise HTTPException(status_code=500, detail=f"Internal server error while creating FAQ: {str(e)}")
 
 @router.get("/tenants/{tenant_id}/usage", response_model=UsageStatsResponse, dependencies=[Depends(verify_admin_token)])
 async def get_tenant_usage(
