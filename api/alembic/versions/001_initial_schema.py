@@ -102,6 +102,28 @@ def upgrade():
         sa.PrimaryKeyConstraint('id')
     )
     op.create_index(op.f('ix_usage_tenant_id'), 'usage', ['tenant_id'], unique=False)
+    
+    # Ensure foreign key constraints have ON DELETE CASCADE
+    op.execute("""
+    DO $$
+    BEGIN
+        -- Drop existing constraint if it exists
+        IF EXISTS (
+            SELECT 1 FROM information_schema.table_constraints 
+            WHERE constraint_name = 'faqs_tenant_id_fkey' AND table_name = 'faqs'
+        ) THEN
+            ALTER TABLE faqs DROP CONSTRAINT faqs_tenant_id_fkey;
+        END IF;
+        
+        -- Add constraint with CASCADE
+        ALTER TABLE faqs 
+        ADD CONSTRAINT faqs_tenant_id_fkey 
+        FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE;
+    EXCEPTION
+        WHEN undefined_object THEN NULL;
+    END
+    $$;
+    """)
 
 
 def downgrade():
