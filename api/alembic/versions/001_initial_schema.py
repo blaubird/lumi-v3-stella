@@ -24,13 +24,17 @@ def upgrade():
     DO $$
     BEGIN
         IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'role_enum') THEN
-            CREATE TYPE role_enum AS ENUM ('user', 'bot');
+            CREATE TYPE role_enum AS ENUM ('user', 'bot', 'inbound', 'assistant');
         END IF;
     EXCEPTION
         WHEN duplicate_object THEN NULL;
     END
     $$;
     """)
+    
+    # Add values to existing enum if it already exists
+    op.execute("ALTER TYPE role_enum ADD VALUE IF NOT EXISTS 'inbound';")
+    op.execute("ALTER TYPE role_enum ADD VALUE IF NOT EXISTS 'assistant';")
     
     # Create direction enum type with idempotent approach
     op.execute("""
@@ -63,7 +67,7 @@ def upgrade():
         sa.Column('id', sa.Integer(), autoincrement=True, nullable=False),
         sa.Column('tenant_id', sa.String(), nullable=False),
         sa.Column('wa_msg_id', sa.String(), nullable=True),
-        sa.Column('role', sa.Enum('user', 'bot', name='role_enum'), nullable=False),
+        sa.Column('role', sa.Enum('user', 'bot', 'inbound', 'assistant', name='role_enum'), nullable=False),
         sa.Column('text', sa.Text(), nullable=False),
         sa.Column('tokens', sa.Integer(), nullable=True),
         sa.Column('ts', sa.TIMESTAMP(), server_default=sa.func.now(), nullable=False),
