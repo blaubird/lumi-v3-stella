@@ -3,6 +3,7 @@ from typing import Optional, List
 from datetime import datetime
 
 class TenantBase(BaseModel):
+    id: str
     phone_id: str
     wh_token: str
     system_prompt: str
