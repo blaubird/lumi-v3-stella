@@ -67,3 +67,5 @@ class Usage(Base):
     
     # Relationships
     tenant = relationship("Tenant", back_populates="usage")
+
+
