@@ -54,7 +54,7 @@ class FAQ(Base):
         embedding = Column(Text, nullable=True)  # Fallback to Text type
     
     # Relationships
-    tenant = relationship("Tenant", back_populates="faqs")
+    tenant = relationship("Tenant", back_populates="faqs", passive_deletes=True)
 
 class Usage(Base):
     __tablename__ = "usage"
@@ -67,5 +67,3 @@ class Usage(Base):
     
     # Relationships
     tenant = relationship("Tenant", back_populates="usage")
-
-
