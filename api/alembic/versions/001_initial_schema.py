@@ -45,17 +45,6 @@ def upgrade():
     $$;
     """)
     
-    # Create trigger function for automatic timestamp updates
-    op.execute("""
-    CREATE OR REPLACE FUNCTION update_modified_column()
-    RETURNS TRIGGER AS $$
-    BEGIN
-        NEW.updated_at = now();
-        RETURN NEW;
-    END;
-    $$ language 'plpgsql';
-    """)
-    
     # Create tenants table
     op.create_table(
         'tenants',
@@ -63,21 +52,10 @@ def upgrade():
         sa.Column('phone_id', sa.String(), nullable=False),
         sa.Column('wh_token', sa.Text(), nullable=False),
         sa.Column('system_prompt', sa.Text(), server_default='You are a helpful assistant.'),
-        sa.Column('created_at', sa.TIMESTAMP(), server_default=sa.text('now()'), nullable=False),
-        sa.Column('updated_at', sa.TIMESTAMP(), server_default=sa.text('now()'), nullable=False),
         sa.PrimaryKeyConstraint('id')
     )
     op.create_index(op.f('ix_tenants_id'), 'tenants', ['id'], unique=False)
     op.create_index(op.f('ix_tenants_phone_id'), 'tenants', ['phone_id'], unique=True)
-    
-    # Add trigger to tenants table
-    op.execute("""
-    DROP TRIGGER IF EXISTS update_tenants_updated_at ON tenants;
-    CREATE TRIGGER update_tenants_updated_at
-    BEFORE UPDATE ON tenants
-    FOR EACH ROW
-    EXECUTE FUNCTION update_modified_column();
-    """)
     
     # Create messages table
     op.create_table(
@@ -103,21 +81,10 @@ def upgrade():
         sa.Column('question', sa.Text(), nullable=False),
         sa.Column('answer', sa.Text(), nullable=False),
         sa.Column('embedding', Vector(1536), nullable=True),
-        sa.Column('created_at', sa.TIMESTAMP(), server_default=sa.text('now()'), nullable=False),
-        sa.Column('updated_at', sa.TIMESTAMP(), server_default=sa.text('now()'), nullable=False),
         sa.ForeignKeyConstraint(['tenant_id'], ['tenants.id'], ondelete='CASCADE'),
         sa.PrimaryKeyConstraint('id')
     )
     op.create_index(op.f('ix_faqs_tenant_id'), 'faqs', ['tenant_id'], unique=False)
-    
-    # Add trigger to faqs table
-    op.execute("""
-    DROP TRIGGER IF EXISTS update_faqs_updated_at ON faqs;
-    CREATE TRIGGER update_faqs_updated_at
-    BEFORE UPDATE ON faqs
-    FOR EACH ROW
-    EXECUTE FUNCTION update_modified_column();
-    """)
     
     # Create usage table
     op.create_table(
@@ -157,17 +124,6 @@ def downgrade():
         DROP TYPE role_enum;
     EXCEPTION
         WHEN undefined_object THEN NULL;
-    END
-    $$;
-    """)
-    
-    # Drop function with idempotent approach
-    op.execute("""
-    DO $$
-    BEGIN
-        DROP FUNCTION update_modified_column();
-    EXCEPTION
-        WHEN undefined_function THEN NULL;
     END
     $$;
     """)
