@@ -32,7 +32,7 @@ class Message(Base):
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
     tenant_id = Column(String, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
     wa_msg_id = Column(String, nullable=True, unique=True)
-    role = Column(Enum("user", "bot", name="role_enum"), nullable=False)
+    role = Column(Enum("user", "bot", "inbound", "assistant", name="role_enum"), nullable=False)
     text = Column(Text, nullable=False)
     tokens = Column(Integer, nullable=True)
     ts = Column(TIMESTAMP, nullable=False, server_default=func.now())
