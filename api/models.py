@@ -22,9 +22,9 @@ class Tenant(Base):
     system_prompt = Column(Text, nullable=False, server_default="You are a helpful assistant.")
     
     # Relationships
-    messages = relationship("Message", back_populates="tenant")
-    faqs = relationship("FAQ", back_populates="tenant")
-    usage = relationship("Usage", back_populates="tenant")
+    messages = relationship("Message", back_populates="tenant", passive_deletes=True)
+    faqs = relationship("FAQ", back_populates="tenant", passive_deletes=True)
+    usage = relationship("Usage", back_populates="tenant", passive_deletes=True)
 
 class Message(Base):
     __tablename__ = "messages"
@@ -32,13 +32,13 @@ class Message(Base):
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
     tenant_id = Column(String, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
     wa_msg_id = Column(String, nullable=True, unique=True)
-    role = Column(Enum("user", "bot", "inbound", "assistant", name="role_enum"), nullable=False)
+    role = Column(Enum("inbound", "assistant", name="role_enum"), nullable=False)
     text = Column(Text, nullable=False)
     tokens = Column(Integer, nullable=True)
     ts = Column(TIMESTAMP, nullable=False, server_default=func.now())
     
     # Relationships
-    tenant = relationship("Tenant", back_populates="messages")
+    tenant = relationship("Tenant", back_populates="messages", passive_deletes=True)
 
 class FAQ(Base):
     __tablename__ = "faqs"
@@ -66,4 +66,4 @@ class Usage(Base):
     msg_ts = Column(TIMESTAMP, nullable=False, server_default=func.now())
     
     # Relationships
-    tenant = relationship("Tenant", back_populates="usage")
+    tenant = relationship("Tenant", back_populates="usage", passive_deletes=True)
