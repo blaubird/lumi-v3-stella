@@ -52,8 +52,6 @@ class FAQ(Base):
         embedding = Column(Vector(1536), nullable=True)
     else:
         embedding = Column(Text, nullable=True)  # Fallback to Text type
-    created_at = Column(TIMESTAMP, nullable=False, server_default=func.now())
-    updated_at = Column(TIMESTAMP, nullable=False, server_default=func.now(), onupdate=func.now())
     
     # Relationships
     tenant = relationship("Tenant", back_populates="faqs")
