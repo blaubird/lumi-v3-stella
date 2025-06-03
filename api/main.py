@@ -48,14 +48,14 @@ if missing_vars:
     logging.error("Please set these environment variables in Railway and restart the application")
     sys.exit(1)
 
+# Run Alembic migrations at startup
+logging.info("Running Alembic migrations...")
+alembic_cfg = AlembicConfig("alembic.ini")
+command.upgrade(alembic_cfg, "head")
+logging.info("Migrations completed")
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Apply Alembic migrations
-    logging.info("Applying Alembic migrations...")
-    alembic_cfg = AlembicConfig("alembic.ini")
-    command.upgrade(alembic_cfg, "head")
-    logging.info("Migrations applied")
-    
     # Initialize database engine
     logging.info("Initializing database engine")
     Base.metadata.create_all(bind=engine)
