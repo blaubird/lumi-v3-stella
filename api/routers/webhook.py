@@ -84,6 +84,7 @@ async def process_message(db: Session, tenant: Tenant, message: Dict[str, Any]):
     message_id = message.get("id")
     from_number = message.get("from")
     text = message.get("text", {}).get("body", "")
+    timestamp = message.get("timestamp")  # Extract timestamp from message
     
     logger.info("Processing message", extra={
         "tenant_id": tenant.id,
@@ -102,8 +103,9 @@ async def process_message(db: Session, tenant: Tenant, message: Dict[str, Any]):
     user_message = Message(
         tenant_id=tenant.id,
         wa_msg_id=message_id,
-        role="user",
-        text=text
+        role="inbound",  # Changed from "user" to "inbound"
+        text=text,
+        tokens=0  # Initialize with 0 tokens
     )
     db.add(user_message)
     
@@ -111,7 +113,8 @@ async def process_message(db: Session, tenant: Tenant, message: Dict[str, Any]):
     usage_record = Usage(
         tenant_id=tenant.id,
         direction="inbound",
-        tokens=0
+        tokens=0,
+        msg_ts=timestamp  # Link usage to message timestamp
     )
     db.add(usage_record)
     db.commit()
@@ -131,7 +134,7 @@ async def process_message(db: Session, tenant: Tenant, message: Dict[str, Any]):
         # Save bot message
         bot_message = Message(
             tenant_id=tenant.id,
-            role="bot",
+            role="assistant",  # Changed from "bot" to "assistant"
             text=answer,
             tokens=token_count
         )
@@ -141,7 +144,8 @@ async def process_message(db: Session, tenant: Tenant, message: Dict[str, Any]):
         outbound_usage = Usage(
             tenant_id=tenant.id,
             direction="outbound",
-            tokens=token_count
+            tokens=token_count,
+            msg_ts=timestamp  # Link usage to message timestamp
         )
         db.add(outbound_usage)
         db.commit()
@@ -166,3 +170,4 @@ async def process_message(db: Session, tenant: Tenant, message: Dict[str, Any]):
             "message_id": message_id,
             "error": str(e)
         }, exc_info=e)
+        
