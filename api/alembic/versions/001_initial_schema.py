@@ -102,6 +102,27 @@ def upgrade():
         sa.PrimaryKeyConstraint('id')
     )
     op.create_index(op.f('ix_usage_tenant_id'), 'usage', ['tenant_id'], unique=False)
+    
+    # Explicitly drop and recreate foreign keys with CASCADE
+    op.execute("""
+    -- 1) faq → tenants
+    ALTER TABLE public.faqs DROP CONSTRAINT IF EXISTS faqs_tenant_id_fkey;
+    ALTER TABLE public.faqs
+      ADD CONSTRAINT faqs_tenant_id_fkey
+      FOREIGN KEY (tenant_id) REFERENCES public.tenants(id) ON DELETE CASCADE;
+
+    -- 2) messages → tenants
+    ALTER TABLE public.messages DROP CONSTRAINT IF EXISTS messages_tenant_id_fkey;
+    ALTER TABLE public.messages
+      ADD CONSTRAINT messages_tenant_id_fkey
+      FOREIGN KEY (tenant_id) REFERENCES public.tenants(id) ON DELETE CASCADE;
+
+    -- 3) usage → tenants
+    ALTER TABLE public.usage DROP CONSTRAINT IF EXISTS usage_tenant_id_fkey;
+    ALTER TABLE public.usage
+      ADD CONSTRAINT usage_tenant_id_fkey
+      FOREIGN KEY (tenant_id) REFERENCES public.tenants(id) ON DELETE CASCADE;
+    """)
 
 
 def downgrade():
