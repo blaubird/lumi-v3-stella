@@ -9,6 +9,7 @@ from models import Tenant, Message, Usage
 from ai import get_rag_response
 from services.whatsapp import send_whatsapp_message
 from logging_utils import get_logger
+from datetime import datetime, timezone
 
 # Initialize logger
 logger = get_logger(__name__)
@@ -93,7 +94,10 @@ async def process_message(db: Session, tenant: Tenant, message: Dict[str, Any]):
         message_id = message.get("id")
         from_number = message.get("from")
         text = message.get("text", {}).get("body", "")
-        timestamp = message.get("timestamp")  # Extract timestamp from message
+        raw_ts = message.get("timestamp")  # Extract timestamp from message
+        
+        # Convert epoch timestamp to datetime object
+        ts = datetime.fromtimestamp(int(raw_ts), timezone.utc) if raw_ts else datetime.now(timezone.utc)
         
         logger.info("Processing message", extra={
             "tenant_id": tenant.id,
@@ -123,7 +127,7 @@ async def process_message(db: Session, tenant: Tenant, message: Dict[str, Any]):
             tenant_id=tenant.id,
             direction="inbound",
             tokens=0,
-            msg_ts=timestamp  # Link usage to message timestamp
+            msg_ts=ts  # Use converted datetime
         )
         db.add(usage_record)
         db.commit()
@@ -154,7 +158,7 @@ async def process_message(db: Session, tenant: Tenant, message: Dict[str, Any]):
                 tenant_id=tenant.id,
                 direction="outbound",
                 tokens=token_count,
-                msg_ts=timestamp  # Link usage to message timestamp
+                msg_ts=ts  # Use converted datetime
             )
             db.add(outbound_usage)
             db.commit()
@@ -184,4 +188,3 @@ async def process_message(db: Session, tenant: Tenant, message: Dict[str, Any]):
             "error": str(e),
             "message": message
         }, exc_info=e)
-        
