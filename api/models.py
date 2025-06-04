@@ -13,6 +13,13 @@ except ImportError:
             raise ImportError("pgvector is not installed. Please install it with 'pip install pgvector'")
     Vector = VectorPlaceholder()
 from db import Base
+
+# Note on ID types:
+# Tenant uses String ID type to support custom identifiers provided during creation
+# All other resources use Integer IDs with autoincrement for internal sequence management
+# This difference is intentional to allow external systems to reference tenants by their own IDs
+# while maintaining simple numeric sequences for child resources
+
 class Tenant(Base):
     __tablename__ = "tenants"
     
