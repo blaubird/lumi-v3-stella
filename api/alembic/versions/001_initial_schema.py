@@ -103,11 +103,19 @@ def upgrade():
         sa.Column('tenant_id', sa.String(), nullable=False),
         sa.Column('direction', sa.Enum('inbound', 'outbound', name='direction_enum'), nullable=False),
         sa.Column('tokens', sa.Integer(), nullable=False),
-        sa.Column('msg_ts', sa.TIMESTAMP(), server_default=sa.func.now(), nullable=False),
+        sa.Column('msg_ts', sa.TIMESTAMP(timezone=True), nullable=False),
         sa.ForeignKeyConstraint(['tenant_id'], ['tenants.id'], ondelete='CASCADE'),
         sa.PrimaryKeyConstraint('id')
     )
     op.create_index(op.f('ix_usage_tenant_id'), 'usage', ['tenant_id'], unique=False)
+    
+    # Convert any existing integer epoch values to timestamps
+    op.execute("""
+    -- convert existing integer epoch to timestamp
+    UPDATE public.usage
+       SET msg_ts = to_timestamp(msg_ts::bigint)
+     WHERE pg_typeof(msg_ts) <> 'timestamp with time zone';
+    """)
     
     # Explicitly drop and recreate foreign keys with CASCADE
     op.execute("""
@@ -133,4 +141,3 @@ def upgrade():
 
 def downgrade():
     pass
-
