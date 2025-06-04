@@ -88,7 +88,7 @@ def upgrade():
         'faqs',
         sa.Column('id', sa.Integer(), autoincrement=True, nullable=False),
         sa.Column('tenant_id', sa.String(), nullable=False),
-        sa.Column('question', sa.Text(), nullable=False),
+        sa.Column('question', sa.String(), nullable=False),  # Changed from Text to String for exact matching
         sa.Column('answer', sa.Text(), nullable=False),
         sa.Column('embedding', Vector(1536), nullable=True),
         sa.ForeignKeyConstraint(['tenant_id'], ['tenants.id'], ondelete='CASCADE'),
