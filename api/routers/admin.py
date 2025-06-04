@@ -48,7 +48,7 @@ async def get_tenants(
         raise HTTPException(status_code=500, detail=f"Internal server error while retrieving tenants: {str(e)}")
 
 
-@router.post("/tenants", response_model=TenantResponse, dependencies=[Depends(verify_admin_token)])
+@router.post("/tenants", response_model=TenantResponse, status_code=201, dependencies=[Depends(verify_admin_token)])
 async def create_tenant(tenant: TenantCreate, db: Session = Depends(get_db)):
     """Create a new tenant"""
     try:
@@ -78,10 +78,10 @@ async def create_tenant(tenant: TenantCreate, db: Session = Depends(get_db)):
         raise
     except Exception as e:
         logger.error("Error creating tenant", extra={"error": str(e)}, exc_info=e)
-        raise HTTPException(status_code=500, detail="Internal server error while creating tenant")
+        raise HTTPException(status_code=500, detail=f"Internal server error while creating tenant: {str(e)}")
 
 
-@router.get("/tenants/{tenant_id}", response_model=TenantResponse, dependencies=[Depends(verify_admin_token)])
+@router.get("/tenants/{tenant_id:str}", response_model=TenantResponse, dependencies=[Depends(verify_admin_token)])
 async def get_tenant(tenant_id: str, db: Session = Depends(get_db)):
     """Get a specific tenant by ID"""
     try:
@@ -96,9 +96,9 @@ async def get_tenant(tenant_id: str, db: Session = Depends(get_db)):
         raise
     except Exception as e:
         logger.error("Error retrieving tenant", extra={"tenant_id": tenant_id, "error": str(e)}, exc_info=e)
-        raise HTTPException(status_code=500, detail="Internal server error while retrieving tenant")
+        raise HTTPException(status_code=500, detail=f"Internal server error while retrieving tenant: {str(e)}")
 
-@router.put("/tenants/{tenant_id}", response_model=TenantResponse, dependencies=[Depends(verify_admin_token)])
+@router.put("/tenants/{tenant_id:str}", response_model=TenantResponse, dependencies=[Depends(verify_admin_token)])
 async def update_tenant(tenant_id: str, tenant: TenantUpdate, db: Session = Depends(get_db)):
     """Update a tenant"""
     try:
@@ -132,9 +132,9 @@ async def update_tenant(tenant_id: str, tenant: TenantUpdate, db: Session = Depe
         raise
     except Exception as e:
         logger.error("Error updating tenant", extra={"tenant_id": tenant_id, "error": str(e)}, exc_info=e)
-        raise HTTPException(status_code=500, detail="Internal server error while updating tenant")
+        raise HTTPException(status_code=500, detail=f"Internal server error while updating tenant: {str(e)}")
 
-@router.delete("/tenants/{tenant_id}", dependencies=[Depends(verify_admin_token)])
+@router.delete("/tenants/{tenant_id:str}", dependencies=[Depends(verify_admin_token)])
 async def delete_tenant(tenant_id: str, db: Session = Depends(get_db)):
     """Delete a tenant"""
     try:
@@ -153,10 +153,10 @@ async def delete_tenant(tenant_id: str, db: Session = Depends(get_db)):
         raise
     except Exception as e:
         logger.error("Error deleting tenant", extra={"tenant_id": tenant_id, "error": str(e)}, exc_info=True)
-        raise HTTPException(status_code=500, detail="Internal server error while deleting tenant")
+        raise HTTPException(status_code=500, detail=f"Internal server error while deleting tenant: {str(e)}")
 
 
-@router.get("/tenants/{tenant_id}/messages", response_model=List[MessageResponse], dependencies=[Depends(verify_admin_token)])
+@router.get("/tenants/{tenant_id:str}/messages", response_model=List[MessageResponse], dependencies=[Depends(verify_admin_token)])
 async def get_tenant_messages(
     tenant_id: str, 
     limit: int = 50, 
@@ -182,9 +182,9 @@ async def get_tenant_messages(
         raise
     except Exception as e:
         logger.error("Error retrieving tenant messages", extra={"tenant_id": tenant_id, "error": str(e)}, exc_info=e)
-        raise HTTPException(status_code=500, detail="Internal server error while retrieving tenant messages")
+        raise HTTPException(status_code=500, detail=f"Internal server error while retrieving tenant messages: {str(e)}")
 
-@router.get("/tenants/{tenant_id}/faqs", response_model=List[FAQResponse], dependencies=[Depends(verify_admin_token)])
+@router.get("/tenants/{tenant_id:str}/faqs", response_model=List[FAQResponse], dependencies=[Depends(verify_admin_token)])
 async def get_tenant_faqs(tenant_id: str, db: Session = Depends(get_db)):
     """Get FAQs for a specific tenant"""
     try:
@@ -201,9 +201,9 @@ async def get_tenant_faqs(tenant_id: str, db: Session = Depends(get_db)):
         raise
     except Exception as e:
         logger.error("Error retrieving tenant FAQs", extra={"tenant_id": tenant_id, "error": str(e)}, exc_info=e)
-        raise HTTPException(status_code=500, detail="Internal server error while retrieving tenant FAQs")
+        raise HTTPException(status_code=500, detail=f"Internal server error while retrieving tenant FAQs: {str(e)}")
 
-@router.post("/tenants/{tenant_id}/faqs", response_model=FAQResponse, dependencies=[Depends(verify_admin_token)])
+@router.post("/tenants/{tenant_id:str}/faqs", response_model=FAQResponse, status_code=201, dependencies=[Depends(verify_admin_token)])
 async def create_faq(
     tenant_id: str, 
     faq: FAQCreate, 
@@ -258,7 +258,7 @@ async def create_faq(
         logger.error("Error creating FAQ", extra={"tenant_id": tenant_id, "error": str(e)}, exc_info=e)
         raise HTTPException(status_code=500, detail=f"Internal server error while creating FAQ: {str(e)}")
 
-@router.get("/tenants/{tenant_id}/usage", response_model=UsageStatsResponse, dependencies=[Depends(verify_admin_token)])
+@router.get("/tenants/{tenant_id:str}/usage", response_model=UsageStatsResponse, dependencies=[Depends(verify_admin_token)])
 async def get_tenant_usage(
     tenant_id: str,
     limit: int = Query(50, ge=1, le=100),
@@ -307,9 +307,9 @@ async def get_tenant_usage(
         raise
     except Exception as e:
         logger.error("Error retrieving tenant usage", extra={"tenant_id": tenant_id, "error": str(e)}, exc_info=e)
-        raise HTTPException(status_code=500, detail="Internal server error while retrieving tenant usage")
+        raise HTTPException(status_code=500, detail=f"Internal server error while retrieving tenant usage: {str(e)}")
 
-@router.post("/tenants/{tenant_id}/faqs/bulk", response_model=BulkFAQImportResponse, dependencies=[Depends(verify_admin_token)])
+@router.post("/tenants/{tenant_id:str}/faqs/bulk", response_model=BulkFAQImportResponse, status_code=201, dependencies=[Depends(verify_admin_token)])
 async def bulk_import_faq(
     tenant_id: str,
     import_data: BulkFAQImportRequest,
@@ -380,13 +380,13 @@ async def bulk_import_faq(
         raise
     except Exception as e:
         logger.error("Error in bulk FAQ import", extra={"tenant_id": tenant_id, "error": str(e)}, exc_info=e)
-        raise HTTPException(status_code=500, detail="Internal server error during bulk FAQ import")
+        raise HTTPException(status_code=500, detail=f"Internal server error during bulk FAQ import: {str(e)}")
 
 async def generate_embedding_for_faq(db: Session, faq_id: int, tenant_id: str, question: str, answer: str):
     """Background task to generate embedding for FAQ"""
     try:
-        # Get the FAQ
-        faq = db.query(FAQ).filter(FAQ.id == faq_id).first()
+        # Get the FAQ from the database
+        faq = db.query(FAQ).filter(FAQ.id == faq_id, FAQ.tenant_id == tenant_id).first()
         if not faq:
             logger.error("FAQ not found for embedding generation", extra={"faq_id": faq_id, "tenant_id": tenant_id})
             return
