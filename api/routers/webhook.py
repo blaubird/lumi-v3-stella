@@ -4,8 +4,9 @@ import logging
 from typing import Dict, Any, List
 from fastapi import APIRouter, Depends, HTTPException, Request, Query, Response, BackgroundTasks
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 from db import get_db
-from models import Tenant, Message, Usage
+from models import Tenant, Message, Usage, FAQ
 from ai import get_rag_response
 from services.whatsapp import send_whatsapp_message
 from logging_utils import get_logger
@@ -132,7 +133,64 @@ async def process_message(db: Session, tenant: Tenant, message: Dict[str, Any]):
         db.add(usage_record)
         db.commit()
         
-        # Generate response using RAG
+        # Check for exact FAQ match before using RAG
+        faq = db.query(FAQ).filter(
+            func.lower(FAQ.question) == func.lower(text),
+            FAQ.tenant_id == tenant.id
+        ).first()
+        
+        if faq:
+            logger.info("Exact FAQ match found", extra={
+                "tenant_id": tenant.id,
+                "faq_id": faq.id,
+                "question": faq.question
+            })
+            
+            answer = faq.answer
+            token_count = len(answer.split())  # Simple token count estimation
+            
+            # Save bot message
+            bot_message = Message(
+                tenant_id=tenant.id,
+                role="assistant",
+                text=answer,
+                tokens=token_count
+            )
+            db.add(bot_message)
+            
+            # Track outbound message usage
+            outbound_usage = Usage(
+                tenant_id=tenant.id,
+                direction="outbound",
+                tokens=token_count,
+                msg_ts=ts
+            )
+            db.add(outbound_usage)
+            db.commit()
+            
+            # Send response via WhatsApp
+            await send_whatsapp_message(
+                phone_id=tenant.phone_id,
+                token=tenant.wh_token,
+                recipient=from_number,
+                message=answer
+            )
+            
+            logger.info("FAQ match response sent", extra={
+                "tenant_id": tenant.id,
+                "to": from_number,
+                "response_length": len(answer),
+                "token_count": token_count
+            })
+            return
+        else:
+            # Log for debugging
+            logger.debug("No exact FAQ match found", extra={
+                "tenant_id": tenant.id,
+                "text": text
+            })
+        
+        # Generate response using RAG if no exact match
         try:
             response = await get_rag_response(
                 db=db,
