@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, ForeignKey, Text, Enum, TIMESTAMP
+from sqlalchemy import Column, Integer, String, ForeignKey, Text, Enum, TIMESTAMP, DateTime
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 # Conditionally import Vector to handle environments without pgvector
@@ -70,7 +70,7 @@ class Usage(Base):
     tenant_id = Column(String, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
     direction = Column(Enum("inbound", "outbound", name="direction_enum"), nullable=False)
     tokens = Column(Integer, nullable=False)
-    msg_ts = Column(TIMESTAMP, nullable=False, server_default=func.now())
+    msg_ts = Column(DateTime(timezone=True), nullable=False)
     
     # Relationships
     tenant = relationship("Tenant", back_populates="usage", passive_deletes=True)
