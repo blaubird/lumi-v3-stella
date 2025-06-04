@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, ForeignKey, Text, Enum, TIMESTAMP, DateTime
+from sqlalchemy import Column, Integer, String, ForeignKey, Text, Enum, TIMESTAMP, DateTime, func
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 # Conditionally import Vector to handle environments without pgvector
@@ -52,7 +52,7 @@ class FAQ(Base):
     
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
     tenant_id = Column(String, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
-    question = Column(Text, nullable=False)
+    question = Column(String, nullable=False)  # Changed from Text to String for exact matching
     answer = Column(Text, nullable=False)
     # Only define embedding column if pgvector is available
     if has_pgvector:
