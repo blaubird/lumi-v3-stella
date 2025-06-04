@@ -1,7 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 from db import get_db
-from models import Tenant
+from models import Tenant, FAQ
 from schemas.rag import QueryRequest, QueryResponse
 from ai import get_rag_response
 from logging_utils import get_logger
@@ -27,7 +28,33 @@ async def query_rag(
             logger.warning("Tenant not found for RAG query", extra={"tenant_id": tenant_id})
             raise HTTPException(status_code=404, detail="Tenant not found")
         
-        # Use the RAG implementation to get a response
+        # Check for exact FAQ match first
+        faq = db.query(FAQ).filter(
+            func.lower(FAQ.question) == func.lower(query.query),
+            FAQ.tenant_id == tenant_id
+        ).first()
+        
+        if faq:
+            logger.info("Exact FAQ match found", extra={
+                "tenant_id": tenant_id,
+                "faq_id": faq.id,
+                "question": faq.question
+            })
+            
+            # Return the exact match answer
+            return {
+                "answer": faq.answer,
+                "sources": [faq],
+                "token_count": len(faq.answer.split())  # Simple token count estimation
+            }
+        else:
+            # Log for debugging
+            logger.debug("No exact FAQ match found", extra={
+                "tenant_id": tenant_id,
+                "query": query.query
+            })
+        
+        # Use the RAG implementation to get a response if no exact match
         response = await get_rag_response(
             db=db,
             tenant_id=tenant_id,
