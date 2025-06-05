@@ -1,17 +1,7 @@
 from sqlalchemy import Column, Integer, String, ForeignKey, Text, Enum, TIMESTAMP, DateTime, func
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
-# Conditionally import Vector to handle environments without pgvector
-try:
-    from pgvector.sqlalchemy import Vector
-    has_pgvector = True
-except ImportError:
-    has_pgvector = False
-    # Create a placeholder for Vector that won't break imports
-    class VectorPlaceholder:
-        def __call__(self, *args, **kwargs):
-            raise ImportError("pgvector is not installed. Please install it with 'pip install pgvector'")
-    Vector = VectorPlaceholder()
+from pgvector.sqlalchemy import Vector
 from db import Base
 
 # Note on ID types:
@@ -54,11 +44,7 @@ class FAQ(Base):
     tenant_id = Column(String, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
     question = Column(String, nullable=False)  # Changed from Text to String for exact matching
     answer = Column(Text, nullable=False)
-    # Only define embedding column if pgvector is available
-    if has_pgvector:
-        embedding = Column(Vector(1536), nullable=True)
-    else:
-        embedding = Column(Text, nullable=True)  # Fallback to Text type
+    embedding = Column(Vector(1536), nullable=True)
     
     # Relationships
     tenant = relationship("Tenant", back_populates="faqs", passive_deletes=True)
