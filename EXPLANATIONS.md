@@ -1,0 +1,1 @@
+Implemented appointment table and enum in migration with SQLite checks. Added Appointment model and exports. Created google calendar helper. Updated webhook with booking regex to store appointments and reply. Verified migrations and hypercorn startup.

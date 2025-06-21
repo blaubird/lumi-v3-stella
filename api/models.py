@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, ForeignKey, Text, Enum, TIMESTAMP, DateTime, func
+from sqlalchemy import Column, Integer, String, ForeignKey, Text, Enum, TIMESTAMP, DateTime, Boolean
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from pgvector.sqlalchemy import Vector
@@ -60,3 +60,26 @@ class Usage(Base):
     
     # Relationships
     tenant = relationship("Tenant", back_populates="usage", passive_deletes=True)
+
+
+class Appointment(Base):
+    __tablename__ = "appointments"
+
+    id = Column(Integer, primary_key=True)
+    tenant_id = Column(String, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
+    customer_phone = Column(String, nullable=False)
+    customer_email = Column(String, nullable=True)
+    starts_at = Column(DateTime(timezone=True), nullable=False)
+    status = Column(Enum("pending", "confirmed", "cancelled", name="appt_status_enum"), nullable=False, default="pending")
+    google_event_id = Column(String, nullable=True)
+    reminded = Column(Boolean, default=False, nullable=False)
+    created_ts = Column(DateTime(timezone=True), server_default=func.now())
+
+
+__all__ = [
+    "Tenant",
+    "Message",
+    "FAQ",
+    "Usage",
+    "Appointment",
+]

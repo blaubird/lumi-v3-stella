@@ -6,7 +6,8 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Query, Response,
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from db import get_db
-from models import Tenant, Message, Usage, FAQ
+from models import Tenant, Message, Usage, FAQ, Appointment
+import re
 from ai import get_rag_response
 from services.whatsapp import send_whatsapp_message
 from logging_utils import get_logger
@@ -14,6 +15,7 @@ from datetime import datetime, timezone
 
 # Initialize logger
 logger = get_logger(__name__)
+BOOK_RE = re.compile(r"\bbook\s+(\d{1,2}[/-]\d{1,2})\s+(\d{1,2}:\d{2})", re.I)
 
 # Define verification token as a constant
 VERIFY_TOKEN = os.getenv("VERIFY_TOKEN", "lumi-verify-6969")
@@ -132,6 +134,56 @@ async def process_message(db: Session, tenant: Tenant, message: Dict[str, Any]):
         )
         db.add(usage_record)
         db.commit()
+
+        m = BOOK_RE.search(text)
+        if m:
+            date_part, time_part = m.groups()
+            try:
+                day, month = map(int, re.split(r"[/-]", date_part))
+                hour, minute = map(int, time_part.split(":"))
+                year = datetime.now(timezone.utc).year
+                starts_at = datetime(year, month, day, hour, minute, tzinfo=timezone.utc)
+            except Exception as exc:
+                logger.error("Failed to parse booking time", extra={"text": text, "error": str(exc)})
+                starts_at = None
+
+            if starts_at:
+                appt = Appointment(
+                    tenant_id=tenant.id,
+                    customer_phone=from_number,
+                    customer_email=None,
+                    starts_at=starts_at,
+                    status="pending",
+                )
+                db.add(appt)
+
+                reply = f"✅ booked for {starts_at.strftime('%d/%m %H:%M')}. You’ll get a reminder."
+                token_count = len(reply.split())
+
+                bot_message = Message(
+                    tenant_id=tenant.id,
+                    role="assistant",
+                    text=reply,
+                    tokens=token_count,
+                )
+                db.add(bot_message)
+
+                outbound_usage = Usage(
+                    tenant_id=tenant.id,
+                    direction="outbound",
+                    tokens=token_count,
+                    msg_ts=ts,
+                )
+                db.add(outbound_usage)
+                db.commit()
+
+                await send_whatsapp_message(
+                    phone_id=tenant.phone_id,
+                    token=tenant.wh_token,
+                    recipient=from_number,
+                    message=reply,
+                )
+                return
         
         # Check for exact FAQ match before using RAG
         faq = db.query(FAQ).filter(
