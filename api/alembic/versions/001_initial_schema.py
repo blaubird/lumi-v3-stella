@@ -16,17 +16,20 @@ depends_on = None
 
 
 def upgrade():
-    # Create extension for pgvector with idempotent approach
-    op.execute('CREATE EXTENSION IF NOT EXISTS vector;')
+    conn = op.get_bind()
+    dialect = conn.dialect.name
+
+    if dialect == 'postgresql':
+        op.execute('CREATE EXTENSION IF NOT EXISTS vector;')
     
-    # Create role enum type with idempotent approach
-    op.execute("""
+    if dialect == 'postgresql':
+        op.execute(
+            """
     DO $$
     BEGIN
         IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'role_enum') THEN
             CREATE TYPE role_enum AS ENUM ('inbound', 'assistant');
         ELSE
-            -- add missing values
             PERFORM 1 FROM pg_enum WHERE enumlabel='inbound' AND enumtypid = 'role_enum'::regtype;
             IF NOT FOUND THEN
                 ALTER TYPE role_enum ADD VALUE 'inbound';
@@ -40,10 +43,11 @@ def upgrade():
         WHEN duplicate_object THEN NULL;
     END
     $$;
-    """)
-    
-    # Create direction enum type with idempotent approach
-    op.execute("""
+            """
+        )
+
+        op.execute(
+            """
     DO $$
     BEGIN
         IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'direction_enum') THEN
@@ -53,7 +57,8 @@ def upgrade():
         WHEN duplicate_object THEN NULL;
     END
     $$;
-    """)
+            """
+        )
     
     # Create tenants table
     op.create_table(
@@ -108,36 +113,81 @@ def upgrade():
         sa.PrimaryKeyConstraint('id')
     )
     op.create_index(op.f('ix_usage_tenant_id'), 'usage', ['tenant_id'], unique=False)
+
+    if dialect == 'postgresql':
+        op.execute(
+            """
+    DO $$
+    BEGIN
+        IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'appt_status_enum') THEN
+            CREATE TYPE appt_status_enum AS ENUM ('pending', 'confirmed', 'cancelled');
+        END IF;
+    EXCEPTION
+        WHEN duplicate_object THEN NULL;
+    END
+    $$;
+            """
+        )
+
+    op.create_table(
+        'appointments',
+        sa.Column('id', sa.Integer(), primary_key=True, autoincrement=True),
+        sa.Column('tenant_id', sa.String(), nullable=False, index=True),
+        sa.Column('customer_phone', sa.String(), nullable=False),
+        sa.Column('customer_email', sa.String(), nullable=True),
+        sa.Column('starts_at', sa.TIMESTAMP(timezone=True), nullable=False),
+        sa.Column('status', sa.Enum('pending', 'confirmed', 'cancelled', name='appt_status_enum'), nullable=False, server_default='pending'),
+        sa.Column('google_event_id', sa.String(), nullable=True),
+        sa.Column('reminded', sa.Boolean(), nullable=False, server_default=sa.text('false')),
+        sa.Column('created_ts', sa.TIMESTAMP(timezone=True), nullable=False, server_default=sa.func.now()),
+        sa.ForeignKeyConstraint(['tenant_id'], ['tenants.id'], ondelete='CASCADE'),
+    )
     
-    # Convert any existing integer epoch values to timestamps
-    op.execute("""
-    -- convert existing integer epoch to timestamp
+    if dialect == 'postgresql':
+        op.execute(
+            """
     UPDATE public.usage
        SET msg_ts = to_timestamp(msg_ts::bigint)
      WHERE pg_typeof(msg_ts) <> 'timestamp with time zone';
-    """)
-    
-    # Explicitly drop and recreate foreign keys with CASCADE
-    op.execute("""
-    -- 1) faq → tenants
+            """
+        )
+
+        op.execute(
+            """
     ALTER TABLE public.faqs DROP CONSTRAINT IF EXISTS faqs_tenant_id_fkey;
     ALTER TABLE public.faqs
       ADD CONSTRAINT faqs_tenant_id_fkey
       FOREIGN KEY (tenant_id) REFERENCES public.tenants(id) ON DELETE CASCADE;
 
-    -- 2) messages → tenants
     ALTER TABLE public.messages DROP CONSTRAINT IF EXISTS messages_tenant_id_fkey;
     ALTER TABLE public.messages
       ADD CONSTRAINT messages_tenant_id_fkey
       FOREIGN KEY (tenant_id) REFERENCES public.tenants(id) ON DELETE CASCADE;
 
-    -- 3) usage → tenants
     ALTER TABLE public.usage DROP CONSTRAINT IF EXISTS usage_tenant_id_fkey;
     ALTER TABLE public.usage
       ADD CONSTRAINT usage_tenant_id_fkey
       FOREIGN KEY (tenant_id) REFERENCES public.tenants(id) ON DELETE CASCADE;
-    """)
+            """
+        )
 
 
 def downgrade():
-    pass
+    conn = op.get_bind()
+    dialect = conn.dialect.name
+
+    op.drop_table('appointments')
+    if dialect == 'postgresql':
+        op.execute("DROP TYPE IF EXISTS appt_status_enum")
+
+    op.drop_table('usage')
+    op.drop_table('faqs')
+    op.drop_table('messages')
+    op.drop_index(op.f('ix_tenants_phone_id'), table_name='tenants')
+    op.drop_index(op.f('ix_tenants_id'), table_name='tenants')
+    op.drop_table('tenants')
+
+    if dialect == 'postgresql':
+        op.execute("DROP TYPE IF EXISTS direction_enum")
+        op.execute("DROP TYPE IF EXISTS role_enum")
+        op.execute("DROP EXTENSION IF EXISTS vector")
