@@ -5,7 +5,7 @@ from typing import Dict, Any, List
 from fastapi import APIRouter, Depends, HTTPException, Request, Query, Response, BackgroundTasks
 from sqlalchemy.orm import Session
 from sqlalchemy import func
-from db import SessionLocal
+from database import SessionLocal
 from models import Tenant, Message, Usage, FAQ, Appointment
 import re
 from ai import get_rag_response
