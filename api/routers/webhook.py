@@ -5,7 +5,7 @@ from typing import Dict, Any, List
 from fastapi import APIRouter, Depends, HTTPException, Request, Query, Response, BackgroundTasks
 from sqlalchemy.orm import Session
 from sqlalchemy import func
-from db import get_db
+from db import SessionLocal
 from models import Tenant, Message, Usage, FAQ, Appointment
 import re
 from ai import get_rag_response
@@ -22,6 +22,14 @@ VERIFY_TOKEN = os.getenv("VERIFY_TOKEN", "lumi-verify-6969")
 
 # Use router without trailing slash to avoid 307 redirects
 router = APIRouter(tags=["Webhook"])
+
+# Dependency to get DB session
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
 
 @router.get("/webhook")
 async def verify_webhook(
@@ -139,11 +147,20 @@ async def process_message(db: Session, tenant: Tenant, message: Dict[str, Any]):
         if m:
             date_part, time_part = m.groups()
             try:
-                day, month = map(int, re.split(r"[/-]", date_part))
+                # Assuming current year for booking if not specified
+                current_year = datetime.now(timezone.utc).year
+                # Parse date and time, handling both MM/DD and MM-DD formats
+                month, day = map(int, re.split(r"[/-]", date_part))
                 hour, minute = map(int, time_part.split(":"))
-                year = datetime.now(timezone.utc).year
-                starts_at = datetime(year, month, day, hour, minute, tzinfo=timezone.utc)
-            except Exception as exc:
+                
+                # Construct datetime object in UTC
+                starts_at = datetime(current_year, month, day, hour, minute, tzinfo=timezone.utc)
+                
+                # If the parsed date is in the past, assume next year
+                if starts_at < datetime.now(timezone.utc):
+                    starts_at = datetime(current_year + 1, month, day, hour, minute, tzinfo=timezone.utc)
+
+            except ValueError as exc:
                 logger.error("Failed to parse booking time", extra={"text": text, "error": str(exc)})
                 starts_at = None
 
@@ -156,9 +173,10 @@ async def process_message(db: Session, tenant: Tenant, message: Dict[str, Any]):
                     status="pending",
                 )
                 db.add(appt)
+                db.commit() # Commit appointment to get its ID if needed later, and ensure it's saved
 
-                reply = f"✅ booked for {starts_at.strftime('%d/%m %H:%M')}. You’ll get a reminder."
-                token_count = len(reply.split())
+                reply = f"✅ booked for {starts_at.strftime("%d/%m %H:%M")}. You’ll get a reminder."
+                token_count = len(reply.split()) # Simple token count estimation
 
                 bot_message = Message(
                     tenant_id=tenant.id,
@@ -186,8 +204,9 @@ async def process_message(db: Session, tenant: Tenant, message: Dict[str, Any]):
                 return
         
         # Check for exact FAQ match before using RAG
+        # Using .ilike() for case-insensitive comparison to prevent SQL injection
         faq = db.query(FAQ).filter(
-            func.lower(FAQ.question) == func.lower(text),
+            FAQ.question.ilike(text),
             FAQ.tenant_id == tenant.id
         ).first()
         
@@ -298,3 +317,7 @@ async def process_message(db: Session, tenant: Tenant, message: Dict[str, Any]):
             "error": str(e),
             "message": message
         }, exc_info=e)
+
+
+
+
