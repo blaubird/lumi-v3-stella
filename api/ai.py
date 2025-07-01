@@ -11,10 +11,15 @@ logger = get_logger(__name__)
 # Add specific logger for AI operations
 logger_ai = logging.getLogger("api.ai")
 
-# Initialize OpenAI client
+# Initialize OpenAI client globally to ensure a single instance
+# This helps prevent memory leaks and resource exhaustion from creating multiple clients.
 client = None
 try:
-    client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+    api_key = os.getenv("OPENAI_API_KEY")
+    if api_key:
+        client = AsyncOpenAI(api_key=api_key)
+    else:
+        logger.warning("OPENAI_API_KEY not found. OpenAI client not initialized.")
 except Exception as e:
     logger.error(
         "Failed to initialize OpenAI client", extra={"error": str(e)}, exc_info=e
@@ -72,7 +77,6 @@ async def generate_embedding(text_content: str) -> Optional[List[float]]:
     """
     Generate an embedding for the given text content using OpenAI's API
     """
-    global client
     if client is None:
         logger.error("OpenAI client is not initialized. Cannot generate embedding.")
         return None
@@ -89,12 +93,6 @@ async def generate_embedding(text_content: str) -> Optional[List[float]]:
                 "text_length": len(text_content),
             },
         )
-
-        # Check API key before request
-        api_key = os.getenv("OPENAI_API_KEY")
-        if not api_key:
-            logger.error("OPENAI_API_KEY is missing before embedding request")
-            return None
 
         response = await client.embeddings.create(
             model=EMBEDDING_MODEL_NAME, input=text_content
@@ -124,8 +122,12 @@ async def find_relevant_faqs(
     """
     Finds the top_k most relevant FAQs from the database for a specific tenant
     based on the user query, using cosine similarity with pgvector.
+    
+    Optimization: Ensure a proper index is created on the 'embedding' column
+    in the FAQ table for efficient similarity search.
+    Example: CREATE INDEX ON faqs USING ivfflat (embedding vector_l2_ops) WITH (lists = 100);
+    (This is a database-level optimization, not directly in Python code)
     """
-    global client
     if client is None:
         logger.error("OpenAI client is not initialized. Cannot find relevant FAQs.")
         raise RuntimeError("OpenAI client is not initialized.")
@@ -225,9 +227,9 @@ async def get_rag_response(
         # response = await openai.ChatCompletion.acreate(...)
 
         if not relevant_faqs:
-            llm_answer = f"I couldn't find specific information in our knowledge base for your question: '{user_query}'. Please try rephrasing or ask something else."
+            llm_answer = f"I couldn't find specific information in our knowledge base for your question: \'{user_query}\'. Please try rephrasing or ask something else."
         else:
-            llm_answer = f"Based on the information I found regarding '{user_query}':\n\n{context_str}\n\n(This is a conceptual answer. An actual LLM would synthesize this information to directly answer your question.)"
+            llm_answer = f"Based on the information I found regarding \'{user_query}\':\n\n{context_str}\n\n(This is a conceptual answer. An actual LLM would synthesize this information to directly answer your question.)"
     except Exception as e:
         logger_ai.error(f"OpenAI error: {e}")
         return "Извините, временная ошибка. Попробуйте позже."
@@ -246,3 +248,5 @@ async def get_rag_response(
     )
 
     return {"answer": llm_answer, "sources": sources, "token_count": token_count}
+
+

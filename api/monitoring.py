@@ -1,5 +1,11 @@
 from prometheus_client import Counter, Histogram, CollectorRegistry
-from fastapi import FastAPI
+from fastapi import FastAPI, Depends, HTTPException
+from sqlalchemy.orm import Session
+from db import SessionLocal
+from logging_utils import get_logger
+
+# Initialize logger
+logger = get_logger(__name__)
 
 # Create a private registry
 registry = CollectorRegistry()
@@ -22,9 +28,6 @@ REQUEST_LATENCY = Histogram(
 def setup_metrics(app: FastAPI):
     """
     Setup metrics for FastAPI application
-    
-    Args:
-        app: FastAPI application instance
     """
     from prometheus_fastapi_instrumentator import Instrumentator
     from prometheus_fastapi_instrumentator.metrics import requests, latency
@@ -45,7 +48,59 @@ def setup_metrics(app: FastAPI):
     instrumentator.add(requests())
     instrumentator.add(latency())
     
-    # Instrument app
+    # Instrument app and expose metrics endpoint
     instrumentator.instrument(app).expose(app, include_in_schema=False)
     
     return app
+
+
+# Dependency to get DB session for health check
+def get_db_health_check():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+
+def add_health_check_endpoint(app: FastAPI):
+    """
+    Adds a comprehensive health check endpoint to the FastAPI application.
+    This health check verifies database connectivity.
+    """
+    @app.get("/health", summary="Health Check", response_description="Application health status")
+    async def health_check(db: Session = Depends(get_db_health_check)):
+        logger.info("Health check requested")
+        status = {"status": "ok", "dependencies": {}}
+
+        # Database connectivity check
+        try:
+            db.execute("SELECT 1")
+            status["dependencies"]["database"] = "ok"
+        except Exception as e:
+            logger.error("Database health check failed", extra={"error": str(e)}, exc_info=True)
+            status["status"] = "degraded"
+            status["dependencies"]["database"] = f"error: {str(e)}"
+            raise HTTPException(status_code=500, detail="Database connection failed")
+
+        # Add other service checks here if needed (e.g., OpenAI, WhatsApp API)
+        # For example, to check OpenAI API:
+        # try:
+        #     from ai import client as openai_client
+        #     if openai_client:
+        #         await openai_client.models.list() # A simple API call
+        #         status["dependencies"]["openai_api"] = "ok"
+        #     else:
+        #         status["dependencies"]["openai_api"] = "error: client not initialized"
+        #         status["status"] = "degraded"
+        # except Exception as e:
+        #     logger.error("OpenAI API health check failed", extra={"error": str(e)}, exc_info=True)
+        #     status["status"] = "degraded"
+        #     status["dependencies"]["openai_api"] = f"error: {str(e)}"
+        #     raise HTTPException(status_code=500, detail="OpenAI API connection failed")
+
+        logger.info("Health check completed", extra=status)
+        return status
+
+
+

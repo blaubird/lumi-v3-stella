@@ -4,6 +4,7 @@ import os
 from typing import Generator
 from db import SessionLocal
 from logging_utils import get_logger
+from config import settings # Import settings
 
 # Initialize logger
 logger = get_logger(__name__)
@@ -41,9 +42,9 @@ def verify_admin_token(x_admin_token: str = Header(None, alias="X-Admin-Token"))
         )
     
     # Get admin token from environment variable
-    admin_token = os.getenv("X_ADMIN_TOKEN")
+    admin_token = settings.X_ADMIN_TOKEN # Use settings
     if not admin_token:
-        logger.error("X_ADMIN_TOKEN environment variable is not set")
+        logger.error("X_ADMIN_TOKEN environment variable is not set in config")
         raise HTTPException(
             status_code=500,
             detail="Admin API key is not configured on the server"
@@ -60,3 +61,5 @@ def verify_admin_token(x_admin_token: str = Header(None, alias="X-Admin-Token"))
     
     logger.info("Admin token verified successfully")
     return x_admin_token
+
+

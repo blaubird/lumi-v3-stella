@@ -1,7 +1,7 @@
 import os
 import logging
 from openai import AsyncOpenAI
-from db import get_db
+from db import SessionLocal # Changed from get_db to SessionLocal
 from models import Tenant, Message, Usage
 from ai import find_relevant_faqs
 from services.whatsapp import send_whatsapp_message
@@ -24,7 +24,7 @@ async def process_ai_reply(tenant_id: str, wa_msg_id: str, user_text: str):
         text: User message text
     """
     # Create a new database session
-    db = next(get_db())
+    db = SessionLocal()
     
     try:
         logger.info("Starting AI reply processing", extra={
@@ -67,15 +67,17 @@ async def process_ai_reply(tenant_id: str, wa_msg_id: str, user_text: str):
         )
         
         for msg in history_messages:
-            messages.append({"role": msg.role, "content": msg.text})
+            # Standardize role naming: 'user' -> 'inbound', 'bot' -> 'assistant'
+            standardized_role = "inbound" if msg.role == "user" else "assistant" if msg.role == "bot" else msg.role
+            messages.append({"role": standardized_role, "content": msg.text})
         
         # Add current user message
-        messages.append({"role": "user", "content": user_text})
+        messages.append({"role": "inbound", "content": user_text}) # Changed 'user' to 'inbound'
         
         logger_ai.info(f"Calling model {OPENAI_MODEL}")
         
         logger.info("Calling OpenAI API", extra={
-            "tenant_id": tenant_id,
+            "tenant_id": tenant.id,
             "model": OPENAI_MODEL,
             "message_count": len(messages),
             "temperature": 0.4
@@ -101,15 +103,15 @@ async def process_ai_reply(tenant_id: str, wa_msg_id: str, user_text: str):
             token_count = response.usage.total_tokens
             
             logger.info("Received OpenAI response", extra={
-                "tenant_id": tenant_id,
+                "tenant_id": tenant.id,
                 "token_count": token_count,
                 "reply_length": len(reply_text)
             })
             
             # Save bot message
             bot_message = Message(
-                tenant_id=tenant_id,
-                role="bot",
+                tenant_id=tenant.id,
+                role="assistant", # Changed 'bot' to 'assistant'
                 text=reply_text,
                 tokens=token_count
             )
@@ -117,7 +119,7 @@ async def process_ai_reply(tenant_id: str, wa_msg_id: str, user_text: str):
             
             # Insert outbound usage record
             usage_record = Usage(
-                tenant_id=tenant_id,
+                tenant_id=tenant.id,
                 direction="outbound",
                 tokens=token_count
             )
@@ -135,7 +137,7 @@ async def process_ai_reply(tenant_id: str, wa_msg_id: str, user_text: str):
             await send_whatsapp_message(phone_id, token, user_phone, reply_text)
             
             logger.info("WhatsApp message sent", extra={
-                "tenant_id": tenant_id,
+                "tenant_id": tenant.id,
                 "to": user_phone
             })
         except Exception as e:
@@ -144,10 +146,12 @@ async def process_ai_reply(tenant_id: str, wa_msg_id: str, user_text: str):
             
     except Exception as e:
         logger.error("Error in process_ai_reply", extra={
-            "tenant_id": tenant_id,
+            "tenant_id": tenant.id,
             "error": str(e)
         }, exc_info=e)
     finally:
         # Close the DB session
         db.close()
         logger.info("AI reply processing completed", extra={"tenant_id": tenant_id})
+
+

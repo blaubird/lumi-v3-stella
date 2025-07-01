@@ -10,6 +10,13 @@ from contextvars import ContextVar
 # Context variable for storing request_id and other metadata
 request_context: ContextVar[Dict[str, Any]] = ContextVar("request_context", default={})
 
+# List of sensitive keys to mask in logs
+SENSITIVE_KEYS = [
+    "token", "wh_token", "api_key", "password", "secret", "admin_token",
+    "X-Admin-Token", "VERIFY_TOKEN", "WH_TOKEN", "OPENAI_API_KEY",
+    "GOOGLE_SERVICE_JSON"
+]
+
 class StructuredLogger:
     """
     Class for structured JSON logging
@@ -17,8 +24,20 @@ class StructuredLogger:
     def __init__(self, name: str):
         self.logger = logging.getLogger(name)
     
+    def _mask_sensitive_data(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Recursively masks sensitive data in a dictionary.
+        """
+        masked_data = data.copy()
+        for key, value in masked_data.items():
+            if isinstance(value, dict):
+                masked_data[key] = self._mask_sensitive_data(value)
+            elif any(s_key.lower() in key.lower() for s_key in SENSITIVE_KEYS):
+                masked_data[key] = "********"
+        return masked_data
+
     def _log(self, level: int, msg: str, extra: Optional[Dict[str, Any]] = None, exc_info=None):
-        """Base logging method with context addition"""
+        """Base logging method with context addition and sensitive data masking"""
         context = request_context.get()
         log_data = {
             "message": msg,
@@ -28,11 +47,11 @@ class StructuredLogger:
         
         # Add request context if available
         if context:
-            log_data.update(context)
+            log_data.update(self._mask_sensitive_data(context))
         
-        # Add additional fields
+        # Add additional fields and mask sensitive ones
         if extra:
-            log_data.update(extra)
+            log_data.update(self._mask_sensitive_data(extra))
         
         # Add exception information if available
         if exc_info:
@@ -161,7 +180,7 @@ def configure_basic_logging():
     """Configure basic logging without FastAPI app dependencies"""
     logging.basicConfig(
         level=logging.INFO,
-        format='%(message)s',  # Use simple format as StructuredLogger does formatting
+        format="%(message)s",  # Use simple format as StructuredLogger does formatting
         handlers=[
             logging.StreamHandler(),  # Console output
         ]
@@ -177,7 +196,7 @@ def setup_logging(app: Optional[FastAPI] = None):
     # Configure basic logging in any case
     logging.basicConfig(
         level=logging.INFO,
-        format='%(message)s',  # Use simple format as StructuredLogger does formatting
+        format="%(message)s",  # Use simple format as StructuredLogger does formatting
         handlers=[
             logging.StreamHandler(),  # Console output
         ]
@@ -193,3 +212,5 @@ def setup_logging(app: Optional[FastAPI] = None):
     
     # Return factory function for creating loggers
     return get_logger
+
+
