@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from typing import List
-from db import get_db
+from database import get_db
 from models import Tenant, Message, FAQ, Usage
 from schemas.admin import (
     TenantCreate,
