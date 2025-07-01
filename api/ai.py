@@ -3,7 +3,7 @@ import logging
 from typing import Dict, Any, List, Optional
 from openai import AsyncOpenAI
 from sqlalchemy.orm import Session
-from models import FAQ
+from database import Base
 from logging_utils import get_logger
 
 # Initialize logger
