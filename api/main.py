@@ -6,8 +6,7 @@ from fastapi.openapi.docs import get_swagger_ui_html
 import sys
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
-from db import get_db, engine, Base
-from models import Tenant, Message
+from database import engine, Base
 from routers import webhook, admin, rag
 from tasks import process_ai_reply
 from monitoring import setup_metrics, add_health_check_endpoint # Import add_health_check_endpoint
@@ -43,8 +42,6 @@ logging.info("Migrations completed")
 async def lifespan(app: FastAPI):
     # Initialize database engine
     logging.info("Initializing database engine")
-    Base.metadata.create_all(bind=engine)
-    
     # Setup metrics
     logging.info("Setting up metrics")
     setup_metrics(app)

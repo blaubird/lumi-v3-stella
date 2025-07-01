@@ -2,7 +2,7 @@ from fastapi import HTTPException, Header
 from sqlalchemy.orm import Session
 import os
 from typing import Generator
-from db import SessionLocal
+from database import SessionLocal
 from logging_utils import get_logger
 from config import settings # Import settings
 

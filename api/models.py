@@ -2,7 +2,7 @@ from sqlalchemy import Column, Integer, String, ForeignKey, Text, Enum, TIMESTAM
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from pgvector.sqlalchemy import Vector
-from db import Base
+from database import Base
 
 # Note on ID types:
 # Tenant uses String ID type to support custom identifiers provided during creation
