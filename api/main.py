@@ -137,7 +137,7 @@ if __name__ == "__main__":
     
     # Configure Hypercorn
     config = Config()
-    config.bind = [f"0.0.0.0:{int(os.getenv("PORT", "8080"))}"]
+    config.bind = [f"0.0.0.0:{int(os.getenv('PORT', '8080'))}"]
     config.use_reloader = True
     
     # Configure Hypercorn logging

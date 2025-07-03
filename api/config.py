@@ -1,5 +1,5 @@
-import os
-from pydantic import BaseSettings, Field, HttpUrl, validator
+from pydantic import Field
+from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
     # Core application settings
