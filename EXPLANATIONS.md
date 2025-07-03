@@ -7,3 +7,4 @@ Implemented appointment table and enum in migration with SQLite checks. Added Ap
   - Replaced stale imports from nonexistent `db` module with correct modules.
   - Converted stray `print` statements in `alembic_utils.py` to structured logging.
 - **Other issues found**: updated internal docs and imports to avoid future unresolved-name errors.
+
