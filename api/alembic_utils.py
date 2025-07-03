@@ -8,6 +8,9 @@ import os
 from sqlalchemy import create_engine, text
 from alembic.config import Config as AlembicConfig
 from alembic import command
+from logging_utils import get_logger
+
+logger = get_logger(__name__)
 
 
 def reset_migration_history(database_url, revision):
@@ -42,7 +45,7 @@ def reset_migration_history(database_url, revision):
                 # Table doesn't exist, likely first run
                 return False
     except Exception as e:
-        print(f"Error resetting migration history: {e}")
+        logger.error("Error resetting migration history", extra={"error": str(e)}, exc_info=e)
         return False
 
 
@@ -69,7 +72,7 @@ def check_migration_consistency(alembic_ini_path):
         
         return (current_head == db_version, current_head, db_version)
     except Exception as e:
-        print(f"Error checking migration consistency: {e}")
+        logger.error("Error checking migration consistency", extra={"error": str(e)}, exc_info=e)
         return (False, None, None)
 
 
@@ -88,5 +91,5 @@ def safe_stamp_head(alembic_ini_path):
         command.stamp(alembic_cfg, "head")
         return True
     except Exception as e:
-        print(f"Error stamping head: {e}")
+        logger.error("Error stamping head", extra={"error": str(e)}, exc_info=e)
         return False
