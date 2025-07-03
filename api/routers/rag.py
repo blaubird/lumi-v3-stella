@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import func
-from db import get_db
+from deps import get_db
 from models import Tenant, FAQ
 from schemas.rag import QueryRequest, QueryResponse
 from ai import get_rag_response

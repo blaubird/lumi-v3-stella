@@ -4,6 +4,7 @@ from typing import Dict, Any, List, Optional
 from openai import AsyncOpenAI
 from sqlalchemy.orm import Session
 from database import Base
+from models import FAQ
 from logging_utils import get_logger
 
 # Initialize logger
