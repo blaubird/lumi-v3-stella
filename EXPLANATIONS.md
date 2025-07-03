@@ -8,3 +8,7 @@ Implemented appointment table and enum in migration with SQLite checks. Added Ap
   - Converted stray `print` statements in `alembic_utils.py` to structured logging.
 - **Other issues found**: updated internal docs and imports to avoid future unresolved-name errors.
 
+## Crash fix July 3
+- **Root cause**: migrating to Pydantic 2 removed `BaseSettings` from the main package.
+- **Fixes applied**: switched imports to `pydantic-settings`, bumped FastAPI, added the new dependency, and corrected two f-string quotes.
+
