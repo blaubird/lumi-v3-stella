@@ -1,7 +1,7 @@
 import os
 import logging
 from openai import AsyncOpenAI
-from db import SessionLocal # Changed from get_db to SessionLocal
+from database import SessionLocal
 from models import Tenant, Message, Usage
 from ai import find_relevant_faqs
 from services.whatsapp import send_whatsapp_message

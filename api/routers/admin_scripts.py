@@ -3,7 +3,8 @@ from sqlalchemy.orm import Session
 from typing import Optional
 import uuid
 
-from db import get_db, engine
+from deps import get_db
+from database import engine
 from models import Tenant, Base
 from deps import verify_admin_token
 from logging_utils import get_logger

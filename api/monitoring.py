@@ -1,7 +1,7 @@
 from prometheus_client import Counter, Histogram, CollectorRegistry
 from fastapi import FastAPI, Depends, HTTPException
 from sqlalchemy.orm import Session
-from db import SessionLocal
+from database import SessionLocal
 from logging_utils import get_logger
 
 # Initialize logger
