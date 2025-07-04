@@ -198,10 +198,14 @@ async def process_message(db: Session, tenant: Tenant, message: Dict[str, Any]):
                 db.add(appt)
                 db.commit()  # Commit appointment to get its ID if needed later, and ensure it's saved
 
+
                 lang = detect_lang(text)
                 dt_str = starts_at.strftime("%d/%m %H:%M")
                 reply = tr("booking.confirmed", lang, dt=dt_str)
                 token_count = len(reply.split())
+
+                reply = f"✅ booked for {starts_at.strftime('%d/%m %H:%M')}. You’ll get a reminder."
+                token_count = len(reply.split()) # Simple token count estimation
 
                 bot_message = Message(
                     tenant_id=tenant.id,
