@@ -1,22 +1,22 @@
 import os
 import logging
-from fastapi import FastAPI, Request, BackgroundTasks, status
+from fastapi import FastAPI, Request, status
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.openapi.docs import get_swagger_ui_html
 import sys
-from sqlalchemy.orm import Session
-from sqlalchemy.exc import IntegrityError
-from database import engine, Base
-from routers import webhook, admin, rag
-from tasks import process_ai_reply
-from monitoring import setup_metrics, add_health_check_endpoint # Import add_health_check_endpoint
+from routers import webhook, admin, rag, telegram_webhook, instagram_webhook
+from jobs.scheduler import init_scheduler
+from monitoring import (
+    setup_metrics,
+    add_health_check_endpoint,
+)  # Import add_health_check_endpoint
 from logging_utils import get_logger, request_context
 from alembic.config import Config as AlembicConfig
 from alembic import command
 from contextlib import asynccontextmanager
 from fastapi.middleware.cors import CORSMiddleware
-from config import settings # Import settings
-from schemas.common import ErrorResponse # Import ErrorResponse schema
+from config import settings  # Import settings
+from schemas.common import ErrorResponse  # Import ErrorResponse schema
 
 # Configure root logger at INFO level
 logging.basicConfig(
@@ -38,6 +38,7 @@ alembic_cfg = AlembicConfig("alembic.ini")
 command.upgrade(alembic_cfg, "head")
 logging.info("Migrations completed")
 
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Initialize database engine
@@ -46,16 +47,17 @@ async def lifespan(app: FastAPI):
     logging.info("Setting up metrics")
     setup_metrics(app)
     logging.info("Metrics setup complete")
-    
+
     # Add comprehensive health check endpoint
     add_health_check_endpoint(app)
     logging.info("Health check endpoint added")
 
     logging.info("Application startup finished")
-    
+
     yield
-    
+
     # Optional shutdown logs could be added here
+
 
 # Create FastAPI app with lifespan
 app = FastAPI(
@@ -64,7 +66,7 @@ app = FastAPI(
     version=settings.PROJECT_VERSION,
     docs_url=None,
     redoc_url="/docs",
-    lifespan=lifespan
+    lifespan=lifespan,
 )
 
 # Add CORS middleware - MUST be before app startup
@@ -72,7 +74,9 @@ logging.info("Adding CORS middleware")
 
 # Get allowed origins from environment variable, default to a safe empty list
 # In a production environment, this should be explicitly set to your frontend domains.
-allowed_origins = [origin.strip() for origin in settings.CORS_ALLOWED_ORIGINS.split(",")]
+allowed_origins = [
+    origin.strip() for origin in settings.CORS_ALLOWED_ORIGINS.split(",")
+]
 
 app.add_middleware(
     CORSMiddleware,
@@ -88,10 +92,15 @@ logging.info("Registering routers")
 app.include_router(webhook.router)
 app.include_router(admin.router)
 app.include_router(rag.router)
+app.include_router(telegram_webhook.router)
+app.include_router(instagram_webhook.router)
 logging.info("Routers registered")
+
+init_scheduler(app)
 
 # Initialize logger
 log = logging.getLogger("api")
+
 
 @app.get("/docs", response_class=HTMLResponse, include_in_schema=False)
 async def custom_swagger_ui_html():
@@ -104,6 +113,7 @@ async def custom_swagger_ui_html():
         swagger_css_url="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui.css",
     )
 
+
 # Global exception handler
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
@@ -113,11 +123,11 @@ async def global_exception_handler(request: Request, exc: Exception):
         extra={
             "path": request.url.path,
             "method": request.method,
-            "exception_type": exc.__class__.__name__
+            "exception_type": exc.__class__.__name__,
         },
-        exc_info=exc
+        exc_info=exc,
     )
-    
+
     status_code = status.HTTP_500_INTERNAL_SERVER_ERROR
     if hasattr(exc, "status_code"):
         status_code = exc.status_code
@@ -127,28 +137,28 @@ async def global_exception_handler(request: Request, exc: Exception):
         content=ErrorResponse(
             error=exc.__class__.__name__,
             detail=str(exc),
-            request_id=request_context.get().get("request_id", "unknown")
-        ).dict()
+            request_id=request_context.get().get("request_id", "unknown"),
+        ).dict(),
     )
+
 
 if __name__ == "__main__":
     import hypercorn.asyncio
     from hypercorn.config import Config
-    
+
     # Configure Hypercorn
     config = Config()
     config.bind = [f"0.0.0.0:{int(os.getenv('PORT', '8080'))}"]
     config.use_reloader = True
-    
+
     # Configure Hypercorn logging
     config.accesslog = "-"  # Output access logs to stdout
-    config.errorlog = "-"   # Output error logs to stdout
+    config.errorlog = "-"  # Output error logs to stdout
     config.loglevel = "INFO"
-    
+
     log.info(f"Starting Hypercorn server on {config.bind}")
-    
+
     # Run app with Hypercorn
     import asyncio
+
     asyncio.run(hypercorn.asyncio.serve(app, config))
-
-

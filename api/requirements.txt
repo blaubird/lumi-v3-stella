@@ -9,8 +9,14 @@ prometheus-client>=0.17.0
 prometheus-fastapi-instrumentator>=7.1.0
 psycopg2-binary>=2.9.5  # PostgreSQL driver
 pydantic>=2.0.0  # Data validation
+
+pydantic-settings>=2.0.3  # BaseSettings for pydantic v2
+
 pydantic-settings>=2.0.0
+
 starlette>=0.27.0  # ASGI framework (FastAPI dependency )
 pgvector>=0.2.0  # Vector support for PostgreSQL
 requests>=2.31.0  # HTTP library for API requests
 aiohttp>=3.8.5  # Async HTTP client for WhatsApp service
+langdetect>=1.0.9
+apscheduler>=3.10.4
