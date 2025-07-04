@@ -8,3 +8,13 @@ Implemented appointment table and enum in migration with SQLite checks. Added Ap
   - Converted stray `print` statements in `alembic_utils.py` to structured logging.
 - **Other issues found**: updated internal docs and imports to avoid future unresolved-name errors.
 
+
+## July 4 Hotfix
+- **Root cause**: Upgrading to pydantic 2 broke config loading since `BaseSettings` moved to `pydantic_settings`.
+- **Fixes applied**: imported `BaseSettings` from the new package and added it to requirements. Adjusted f-string quoting in `main.py` and `webhook.py` to avoid syntax errors. Verified migrations and startup under Hypercorn.
+
+## Multilingual & channel scaffold
+- Added i18n templates with language detection and ICS generator
+- Introduced Telegram/Instagram services and webhooks
+- Added calendar wrapper and scheduled jobs for confirmations and reminders
+- WhatsApp service now sends .ics attachments
