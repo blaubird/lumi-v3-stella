@@ -93,3 +93,4 @@ def safe_stamp_head(alembic_ini_path):
     except Exception as e:
         logger.error("Error stamping head", extra={"error": str(e)}, exc_info=e)
         return False
+
