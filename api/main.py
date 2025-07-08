@@ -32,17 +32,18 @@ for name in ("api", "hypercorn.access", "hypercorn.error", "sqlalchemy"):
 
 logging.info("Starting application")
 
-# Run Alembic migrations at startup
-logging.info("Running Alembic migrations...")
-alembic_cfg = AlembicConfig("alembic.ini")
-command.upgrade(alembic_cfg, "head")
-logging.info("Migrations completed")
-
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Initialize database engine
     logging.info("Initializing database engine")
+
+    # Run Alembic migrations at startup
+    logging.info("Running Alembic migrations...")
+    alembic_cfg = AlembicConfig("alembic.ini")
+    command.upgrade(alembic_cfg, "head")
+    logging.info("Migrations completed")
+
     # Setup metrics
     logging.info("Setting up metrics")
     setup_metrics(app)
@@ -148,7 +149,7 @@ if __name__ == "__main__":
 
     # Configure Hypercorn
     config = Config()
-    config.bind = [f"0.0.0.0:{int(os.getenv('PORT', '8080'))}"]
+    config.bind = [f"0.0.0.0:{int(os.getenv(\'PORT\', \'8080\'))}"]
     config.use_reloader = True
 
     # Configure Hypercorn logging
