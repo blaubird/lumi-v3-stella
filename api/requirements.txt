@@ -20,3 +20,8 @@ requests>=2.31.0  # HTTP library for API requests
 aiohttp>=3.8.5  # Async HTTP client for WhatsApp service
 langdetect>=1.0.9
 apscheduler>=3.10.4
+
+google-auth-oauthlib>=1.2.0
+google-api-python-client>=2.100.0
+
+
