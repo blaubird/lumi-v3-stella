@@ -1,5 +1,6 @@
 import os
 from datetime import datetime, timedelta
+from typing import Any, cast
 from sqlalchemy.orm import Session
 from database import SessionLocal
 from models import Appointment, Tenant
@@ -26,14 +27,18 @@ async def send_reminders() -> None:
         )
         for appt in upcoming:
             tenant = db.query(Tenant).filter(Tenant.id == appt.tenant_id).first()
-            if not tenant:
+            if tenant is None:
                 continue
-            dt = appt.starts_at.strftime("%d/%m %H:%M")
+            appt = cast(Appointment, appt)
+            dt = cast(datetime, appt.starts_at).strftime("%d/%m %H:%M")
             text = tr("booking.reminder", dt=dt)
             await send_whatsapp_message(
-                tenant.phone_id, tenant.wh_token, appt.customer_phone, text
+                cast(str, tenant.phone_id),
+                cast(str, tenant.wh_token),
+                cast(str, appt.customer_phone),
+                text,
             )
-            appt.reminded = True
+            cast(Any, appt).reminded = True
             db.commit()
     except Exception as exc:
         logger.error("send_reminders failed", extra={"error": str(exc)}, exc_info=exc)

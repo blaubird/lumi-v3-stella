@@ -19,4 +19,6 @@ def create_event(
         raise RuntimeError("Google calendar credentials missing")
 
 
-# TODO: implement Outlook calendar support
+def create_outlook_event(*args, **kwargs) -> str:
+    """Placeholder for future Outlook calendar integration."""
+    raise NotImplementedError("Outlook calendar integration is not implemented yet")

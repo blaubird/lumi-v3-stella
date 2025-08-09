@@ -3,7 +3,6 @@ import logging
 from typing import Dict, Any, List, Optional
 from openai import AsyncOpenAI
 from sqlalchemy.orm import Session
-from database import Base
 from models import FAQ
 from logging_utils import get_logger
 
@@ -123,7 +122,7 @@ async def find_relevant_faqs(
     """
     Finds the top_k most relevant FAQs from the database for a specific tenant
     based on the user query, using cosine similarity with pgvector.
-    
+
     Optimization: Ensure a proper index is created on the 'embedding' column
     in the FAQ table for efficient similarity search.
     Example: CREATE INDEX ON faqs USING ivfflat (embedding vector_l2_ops) WITH (lists = 100);
@@ -228,12 +227,16 @@ async def get_rag_response(
         # response = await openai.ChatCompletion.acreate(...)
 
         if not relevant_faqs:
-            llm_answer = f"I couldn't find specific information in our knowledge base for your question: \'{user_query}\'. Please try rephrasing or ask something else."
+            llm_answer = f"I couldn't find specific information in our knowledge base for your question: '{user_query}'. Please try rephrasing or ask something else."
         else:
-            llm_answer = f"Based on the information I found regarding \'{user_query}\':\n\n{context_str}\n\n(This is a conceptual answer. An actual LLM would synthesize this information to directly answer your question.)"
+            llm_answer = f"Based on the information I found regarding '{user_query}':\n\n{context_str}\n\n(This is a conceptual answer. An actual LLM would synthesize this information to directly answer your question.)"
     except Exception as e:
         logger_ai.error(f"OpenAI error: {e}")
-        return "Извините, временная ошибка. Попробуйте позже."
+        return {
+            "answer": "Извините, временная ошибка. Попробуйте позже.",
+            "sources": [],
+            "token_count": 0,
+        }
 
     # Calculate token count (simplified estimation)
     # In a real implementation, this would come from the OpenAI API response
@@ -249,5 +252,3 @@ async def get_rag_response(
     )
 
     return {"answer": llm_answer, "sources": sources, "token_count": token_count}
-
-

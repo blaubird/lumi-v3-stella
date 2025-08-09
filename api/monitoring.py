@@ -1,5 +1,6 @@
 from prometheus_client import Counter, Histogram, CollectorRegistry
 from fastapi import FastAPI, Depends, HTTPException
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 from database import SessionLocal
 from logging_utils import get_logger
@@ -12,18 +13,19 @@ registry = CollectorRegistry()
 
 # Create metrics
 REQUEST_COUNT = Counter(
-    'http_requests_total',
-    'Total count of HTTP requests',
-    ['method', 'endpoint'],
-    registry=registry
+    "http_requests_total",
+    "Total count of HTTP requests",
+    ["method", "endpoint"],
+    registry=registry,
 )
 
 REQUEST_LATENCY = Histogram(
-    'http_request_latency_seconds',
-    'HTTP request latency in seconds',
-    ['method', 'endpoint'],
-    registry=registry
+    "http_request_latency_seconds",
+    "HTTP request latency in seconds",
+    ["method", "endpoint"],
+    registry=registry,
 )
+
 
 def setup_metrics(app: FastAPI):
     """
@@ -31,7 +33,7 @@ def setup_metrics(app: FastAPI):
     """
     from prometheus_fastapi_instrumentator import Instrumentator
     from prometheus_fastapi_instrumentator.metrics import requests, latency
-    
+
     # Create instrumentator
     instrumentator = Instrumentator(
         should_group_status_codes=True,
@@ -43,14 +45,14 @@ def setup_metrics(app: FastAPI):
         inprogress_name="inprogress",
         inprogress_labels=True,
     )
-    
+
     # Add custom metrics using the supported method
     instrumentator.add(requests())
     instrumentator.add(latency())
-    
+
     # Instrument app and expose metrics endpoint
     instrumentator.instrument(app).expose(app, include_in_schema=False)
-    
+
     return app
 
 
@@ -68,17 +70,24 @@ def add_health_check_endpoint(app: FastAPI):
     Adds a comprehensive health check endpoint to the FastAPI application.
     This health check verifies database connectivity.
     """
-    @app.get("/health", summary="Health Check", response_description="Application health status")
+
+    @app.get(
+        "/health",
+        summary="Health Check",
+        response_description="Application health status",
+    )
     async def health_check(db: Session = Depends(get_db_health_check)):
         logger.info("Health check requested")
         status = {"status": "ok", "dependencies": {}}
 
         # Database connectivity check
         try:
-            db.execute("SELECT 1")
+            db.execute(text("SELECT 1"))
             status["dependencies"]["database"] = "ok"
         except Exception as e:
-            logger.error("Database health check failed", extra={"error": str(e)}, exc_info=True)
+            logger.error(
+                "Database health check failed", extra={"error": str(e)}, exc_info=True
+            )
             status["status"] = "degraded"
             status["dependencies"]["database"] = f"error: {str(e)}"
             raise HTTPException(status_code=500, detail="Database connection failed")
@@ -101,6 +110,3 @@ def add_health_check_endpoint(app: FastAPI):
 
         logger.info("Health check completed", extra=status)
         return status
-
-
-
