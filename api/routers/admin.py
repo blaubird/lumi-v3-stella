@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import func
-from typing import List
+from typing import List, Any, cast
 from deps import get_db
 from models import Tenant, Message, FAQ, Usage
 from schemas.admin import (
@@ -160,6 +160,8 @@ async def update_tenant(
             )
             raise HTTPException(status_code=404, detail="Tenant not found")
 
+        db_tenant = cast(Tenant, db_tenant)
+
         # Update fields if provided
         if tenant.phone_id is not None:
             # Check if new phone_id already exists
@@ -175,13 +177,13 @@ async def update_tenant(
                     raise HTTPException(
                         status_code=400, detail="Phone ID already exists"
                     )
-            db_tenant.phone_id = tenant.phone_id
+            cast(Any, db_tenant).phone_id = tenant.phone_id
 
         if tenant.wh_token is not None:
-            db_tenant.wh_token = tenant.wh_token
+            cast(Any, db_tenant).wh_token = tenant.wh_token
 
         if tenant.system_prompt is not None:
-            db_tenant.system_prompt = tenant.system_prompt
+            cast(Any, db_tenant).system_prompt = tenant.system_prompt
 
         db.commit()
         db.refresh(db_tenant)
@@ -351,15 +353,15 @@ async def create_faq(
                 status_code=400, detail=f"Error creating FAQ: {str(db_error)}"
             )
 
-        # Generate embedding in background
-        background_tasks.add_task(
-            generate_embedding_for_faq,
-            db=db,
-            faq_id=db_faq.id,
-            tenant_id=tenant_id,
-            question=faq.question,
-            answer=faq.answer,
-        )
+            # Generate embedding in background
+            background_tasks.add_task(
+                generate_embedding_for_faq,
+                db=db,
+                faq_id=cast(int, db_faq.id),
+                tenant_id=tenant_id,
+                question=faq.question,
+                answer=faq.answer,
+            )
 
         logger.info(
             "FAQ created",
@@ -506,7 +508,7 @@ async def bulk_import_faq(
                 background_tasks.add_task(
                     generate_embedding_for_faq,
                     db=db,
-                    faq_id=db_faq.id,
+                    faq_id=cast(int, db_faq.id),
                     tenant_id=tenant_id,
                     question=item.question,
                     answer=item.answer,
@@ -570,11 +572,14 @@ async def generate_embedding_for_faq(
             )
             return
 
+        faq = cast(FAQ, faq)
+
         # Generate embedding for the combined question and answer text
         embedding = await generate_embedding(f"{question}\n{answer}")
 
         # Update FAQ with embedding
-        faq.embedding = embedding
+        faq = cast(FAQ, faq)
+        setattr(faq, "embedding", embedding)
         db.commit()
 
         logger.info(

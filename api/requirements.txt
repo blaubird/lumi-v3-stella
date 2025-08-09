@@ -1,27 +1,20 @@
-fastapi>=0.111.0
-hypercorn>=0.15.0
-sqlalchemy>=2.0.0
-alembic>=1.11.0
-httpx>=0.24.0
-openai>=1.80.0
-python-dotenv>=1.0.0
-prometheus-client>=0.17.0
-prometheus-fastapi-instrumentator>=7.1.0
-psycopg2-binary>=2.9.5  # PostgreSQL driver
-pydantic>=2.0.0  # Data validation
-
-pydantic-settings>=2.0.3  # BaseSettings for pydantic v2
-
-pydantic-settings>=2.0.0
-
-starlette>=0.27.0  # ASGI framework (FastAPI dependency )
-pgvector>=0.2.0  # Vector support for PostgreSQL
-requests>=2.31.0  # HTTP library for API requests
-aiohttp>=3.8.5  # Async HTTP client for WhatsApp service
-langdetect>=1.0.9
-apscheduler>=3.10.4
-
-google-auth-oauthlib>=1.2.0
-google-api-python-client>=2.100.0
-
-
+fastapi==0.111.0
+hypercorn==0.15.0
+sqlalchemy==2.0.30
+alembic==1.13.2
+httpx==0.24.1
+openai==1.80.0
+python-dotenv==1.0.1
+prometheus-client==0.17.1
+prometheus-fastapi-instrumentator==7.1.0
+psycopg2-binary==2.9.9
+pydantic==2.8.2
+pydantic-settings==2.2.1
+starlette==0.37.2
+pgvector==0.2.4
+requests==2.31.0
+aiohttp==3.9.5
+langdetect==1.0.9
+apscheduler==3.10.4
+google-auth-oauthlib==1.2.0
+google-api-python-client==2.100.0

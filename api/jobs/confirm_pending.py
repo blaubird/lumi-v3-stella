@@ -1,4 +1,5 @@
-from datetime import timedelta
+from datetime import datetime, timedelta
+from typing import Any, cast
 from sqlalchemy.orm import Session
 from database import SessionLocal
 from models import Appointment, Tenant
@@ -17,27 +18,31 @@ async def confirm_pending() -> None:
         pending = db.query(Appointment).filter(Appointment.status == "pending").all()
         for appt in pending:
             tenant = db.query(Tenant).filter(Tenant.id == appt.tenant_id).first()
-            if not tenant:
+            if tenant is None:
                 continue
-            dt = appt.starts_at.strftime("%d/%m %H:%M")
+            appt = cast(Appointment, appt)
+            starts_at = cast(datetime, appt.starts_at)
+            phone_id = cast(str, tenant.phone_id)
+            token = cast(str, tenant.wh_token)
+            dt = starts_at.strftime("%d/%m %H:%M")
             text = tr("booking.confirmed", dt=dt)
-            ics = generate_ics("Appointment", appt.starts_at)
+            ics = generate_ics("Appointment", starts_at)
             await send_whatsapp_message(
-                tenant.phone_id,
-                tenant.wh_token,
-                appt.customer_phone,
+                phone_id,
+                token,
+                cast(str, appt.customer_phone),
                 text,
                 attachment=ics,
             )
             try:
-                appt.google_event_id = create_event(
+                cast(Any, appt).google_event_id = create_event(
                     "Appointment",
-                    appt.starts_at,
-                    appt.starts_at + timedelta(hours=1),
+                    starts_at,
+                    starts_at + timedelta(hours=1),
                 )
             except RuntimeError:
                 logger.info("Calendar disabled")
-            appt.status = "confirmed"
+            cast(Any, appt).status = "confirmed"
             db.commit()
     except Exception as exc:
         logger.error("confirm_pending failed", extra={"error": str(exc)}, exc_info=exc)

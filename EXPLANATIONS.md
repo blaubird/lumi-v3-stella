@@ -25,3 +25,14 @@ yp1pcw-codex/fix-crash-related-to-pydantic-import
 - **Fixes applied**: switched imports to `pydantic-settings`, bumped FastAPI, added the new dependency, and corrected two f-string quotes.
 
  main
+
+## Cleanup and typing hardening
+- Removed committed bytecode and added `.gitignore` for caches and databases.
+- Consolidated and pinned `requirements.txt` to ensure reproducible installs.
+- Reworked logging to route everything through `logging_utils.get_logger`.
+- Replaced root logger usage in `main.py`; added structured logging middleware.
+- Introduced Outlook stub in `services/calendar.py` for future integration.
+- Fixed lint warnings and unused imports via `ruff --fix` and formatted code with `black`.
+- Resolved 63 pyright errors by casting SQLAlchemy columns, tightening config loading, and normalising message structures.
+- Added extensive type hints and safe casts across jobs, routers and tasks.
+- Attempted Hypercorn startup but it failed due to missing environment variables.
