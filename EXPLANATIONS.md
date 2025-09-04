@@ -46,3 +46,8 @@ yp1pcw-codex/fix-crash-related-to-pydantic-import
 
 ## Redis version bump
 - Updated Redis dependency to 6.4.0 to track latest upstream fixes.
+
+## Testing scaffold and webhook pipeline refactor
+- Added pytest with async health check to guard /healthz.
+- Introduced handler pipeline (FAQ → Booking → AI) for webhook processing.
+- Centralised reply send and single commit per message.
