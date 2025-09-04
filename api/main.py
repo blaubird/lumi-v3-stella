@@ -1,4 +1,14 @@
+"""FastAPI application entry point."""
+
+# ruff: noqa: E402
 import os
+import sys
+
+ROOT = os.path.dirname(os.path.abspath(__file__))
+PROJECT_ROOT = os.path.dirname(ROOT)
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
+
 from typing import Any, cast
 from fastapi import FastAPI, Request, status
 from fastapi.responses import HTMLResponse, JSONResponse

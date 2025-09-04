@@ -57,3 +57,9 @@ yp1pcw-codex/fix-crash-related-to-pydantic-import
 - Replaced `os.getenv` defaults and routed webhook/admin secrets through settings.
 - Integrated `tiktoken` with runtime guards and helper functions for token counting.
 - AI handler records prompt/completion/total tokens; non-AI flows log zero usage.
+ codex/eliminate-hardcoded-secrets-and-integrate-tiktoken-907npe
+
+## Import resolution hotfix
+- Added missing `__init__` files so `api`, `handlers`, and `routers` resolve as packages.
+- Inserted a safety guard in `main.py` to prepend the project root to `sys.path` for flexible run modes.
+- Added a smoke test verifying key modules import cleanly.
