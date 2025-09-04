@@ -1,35 +1,45 @@
-import os
 import logging
-from typing import Dict, Any, List, Optional
+from typing import Any, Dict, List, Optional
+
+import tiktoken
 from openai import AsyncOpenAI
 from sqlalchemy.orm import Session
-from models import FAQ
+
+from config import settings
 from logging_utils import get_logger
+from models import FAQ
 
 # Initialize logger
 logger = get_logger(__name__)
 # Add specific logger for AI operations
 logger_ai = logging.getLogger("api.ai")
 
+# Ensure tiktoken has required APIs
+if not (hasattr(tiktoken, "encoding_for_model") and hasattr(tiktoken, "get_encoding")):
+    raise RuntimeError("tiktoken package is outdated; please upgrade it")
+
+
+def get_encoding(model: str) -> tiktoken.Encoding:
+    try:
+        return tiktoken.encoding_for_model(model)
+    except Exception:
+        return tiktoken.get_encoding("cl100k_base")
+
+
+def count_tokens(text: str, model: str) -> int:
+    enc = get_encoding(model)
+    return len(enc.encode(text or ""))
+
+
 # Initialize OpenAI client globally to ensure a single instance
 # This helps prevent memory leaks and resource exhaustion from creating multiple clients.
 client = None
 try:
-    api_key = os.getenv("OPENAI_API_KEY")
-    if api_key:
-        client = AsyncOpenAI(api_key=api_key)
-    else:
-        logger.warning("OPENAI_API_KEY not found. OpenAI client not initialized.")
+    client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
 except Exception as e:
     logger.error(
         "Failed to initialize OpenAI client", extra={"error": str(e)}, exc_info=e
     )
-
-# Model names
-EMBEDDING_MODEL_NAME = "text-embedding-ada-002"
-MODEL_NAME = os.getenv(
-    "OPENAI_MODEL", "ft:gpt-4.1-nano-2025-04-14:luminiteq:flora:Bdezn8Rp"
-)
 
 
 def track_openai_call(model: str, endpoint: str):
@@ -95,7 +105,7 @@ async def generate_embedding(text_content: str) -> Optional[List[float]]:
         )
 
         response = await client.embeddings.create(
-            model=EMBEDDING_MODEL_NAME, input=text_content
+            model=settings.EMBEDDING_MODEL_NAME, input=text_content
         )
         embedding = response.data[0].embedding
 
@@ -170,7 +180,7 @@ async def find_relevant_faqs(
         return []
 
 
-@track_openai_call(model=MODEL_NAME, endpoint="chat/completions")
+@track_openai_call(model=settings.OPENAI_MODEL, endpoint="chat/completions")
 async def get_rag_response(
     db: Session, tenant_id: str, user_query: str, system_prompt: str
 ) -> Dict[str, Any]:
@@ -214,7 +224,7 @@ async def get_rag_response(
     # Construct the prompt for the LLM
     prompt = f"{system_prompt}\n\nContext from knowledge base:\n{context_str}\n\nUser Question: {user_query}\n\nAnswer:"
 
-    logger_ai.info(f"Calling model {MODEL_NAME}")
+    logger_ai.info(f"Calling model {settings.OPENAI_MODEL}")
 
     logger.debug(
         "Constructed prompt for LLM",
@@ -238,17 +248,25 @@ async def get_rag_response(
             "token_count": 0,
         }
 
-    # Calculate token count (simplified estimation)
-    # In a real implementation, this would come from the OpenAI API response
-    token_count = len(prompt.split()) + len(llm_answer.split())
+    prompt_tokens = count_tokens(prompt, settings.OPENAI_MODEL)
+    completion_tokens = count_tokens(llm_answer, settings.OPENAI_MODEL)
+    total_tokens = prompt_tokens + completion_tokens
 
     logger.info(
         "RAG: Generated response",
         extra={
             "tenant_id": tenant_id,
             "response_length": len(llm_answer),
-            "token_count": token_count,
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "total_tokens": total_tokens,
         },
     )
 
-    return {"answer": llm_answer, "sources": sources, "token_count": token_count}
+    return {
+        "answer": llm_answer,
+        "sources": sources,
+        "prompt_tokens": prompt_tokens,
+        "completion_tokens": completion_tokens,
+        "total_tokens": total_tokens,
+    }

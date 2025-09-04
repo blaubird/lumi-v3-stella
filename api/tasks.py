@@ -1,20 +1,20 @@
-import os
-from typing import List, cast, Optional
+from typing import List, Optional, cast
+
 from openai import AsyncOpenAI
 from openai.types.chat import ChatCompletionMessageParam
-from database import SessionLocal
-from models import Tenant, Message, Usage
+
 from ai import find_relevant_faqs
-from services.whatsapp import send_whatsapp_message
+from config import settings
+from database import SessionLocal
 from logging_utils import get_logger
+from models import Message, Tenant, Usage
+from services.whatsapp import send_whatsapp_message
 
 logger = get_logger(__name__)
 logger_ai = get_logger("api.ai")
 
-# Get OpenAI model from environment
-OPENAI_MODEL = os.getenv(
-    "OPENAI_MODEL", "ft:gpt-4.1-nano-2025-04-14:luminiteq:flora:Bdezn8Rp"
-)
+# Configured OpenAI model
+OPENAI_MODEL = settings.OPENAI_MODEL
 
 
 async def process_ai_reply(tenant_id: str, wa_msg_id: str, user_text: str) -> None:
@@ -110,12 +110,7 @@ async def process_ai_reply(tenant_id: str, wa_msg_id: str, user_text: str) -> No
         )
 
         # Call OpenAI API
-        api_key = os.getenv("OPENAI_API_KEY")
-        if not api_key:
-            logger.error("OPENAI_API_KEY environment variable not set")
-            return
-
-        ai = AsyncOpenAI(api_key=api_key)
+        ai = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
 
         try:
             response = await ai.chat.completions.create(
@@ -159,8 +154,8 @@ async def process_ai_reply(tenant_id: str, wa_msg_id: str, user_text: str) -> No
             db.commit()
 
             # Get WhatsApp credentials from tenant
-            phone_id = os.getenv("WH_PHONE_ID") or cast(str, tenant.phone_id)
-            token = os.getenv("WH_TOKEN") or cast(str, tenant.wh_token)
+            phone_id = settings.WH_PHONE_ID
+            token = settings.WH_TOKEN
 
             # Extract user phone from wa_msg_id (format: "phone:message_id")
             user_phone = wa_msg_id.split(":")[0] if ":" in wa_msg_id else wa_msg_id
