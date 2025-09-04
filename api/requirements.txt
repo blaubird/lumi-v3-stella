@@ -18,3 +18,5 @@ langdetect==1.0.9
 apscheduler==3.10.4
 google-auth-oauthlib==1.2.0
 google-api-python-client==2.100.0
+
+redis>=5.0.1
