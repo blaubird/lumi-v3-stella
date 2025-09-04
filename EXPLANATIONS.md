@@ -43,3 +43,6 @@ yp1pcw-codex/fix-crash-related-to-pydantic-import
 - Health endpoint checks Redis and reports degraded on failure.
 - Introduced cache helpers for tenant config and FAQs with TTL and Prometheus hit/miss counters.
 - Webhook message processing now retrieves tenant and FAQ data via Redis cache.
+
+## Redis version bump
+- Updated Redis dependency to 6.4.0 to track latest upstream fixes.
