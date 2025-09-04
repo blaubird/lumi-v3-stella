@@ -51,11 +51,7 @@ async def query_rag(tenant_id: str, query: QueryRequest, db: Session = Depends(g
             )
 
             # Return the exact match answer
-            return {
-                "answer": faq.answer,
-                "sources": [faq],
-                "token_count": len(faq.answer.split()),  # Simple token count estimation
-            }
+            return {"answer": faq.answer, "sources": [faq], "token_count": 0}
         else:
             # Log for debugging
             logger.debug(
