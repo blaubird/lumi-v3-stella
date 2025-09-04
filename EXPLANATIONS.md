@@ -51,3 +51,9 @@ yp1pcw-codex/fix-crash-related-to-pydantic-import
 - Added pytest with async health check to guard /healthz.
 - Introduced handler pipeline (FAQ → Booking → AI) for webhook processing.
 - Centralised reply send and single commit per message.
+
+## Token accounting and secrets cleanup
+- Switched word-based counts to tiktoken with guards for future API changes.
+- Consolidated configuration through Pydantic settings and removed os.getenv defaults.
+- Added WEBHOOK_VERIFY_TOKEN and optional SENTRY_DSN; app now fails fast when required env vars are missing.
+- Non-AI paths record zero token usage to keep billing accurate.

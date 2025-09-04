@@ -3,15 +3,14 @@ import sys
 import types
 from typing import Any, cast
 
-import pytest
-from httpx import ASGITransport, AsyncClient
-
 os.environ.setdefault("DATABASE_URL", "sqlite:///./test.db")
 os.environ.setdefault("OPENAI_API_KEY", "test")
-os.environ.setdefault("VERIFY_TOKEN", "test")
+os.environ.setdefault("OPENAI_MODEL", "gpt-4o-mini")
+os.environ.setdefault("WEBHOOK_VERIFY_TOKEN", "test")
 os.environ.setdefault("WH_TOKEN", "test")
 os.environ.setdefault("WH_PHONE_ID", "1")
 os.environ.setdefault("X_ADMIN_TOKEN", "test")
+os.environ.setdefault("REDIS_URL", "redis://localhost:6379/0")
 
 
 class FakeRedisClient:
@@ -39,7 +38,9 @@ sys.path.append("api")
 from api.main import app  # noqa: E402
 
 
-@pytest.mark.asyncio
+from httpx import ASGITransport, AsyncClient
+
+
 async def test_healthz() -> None:
     transport = ASGITransport(app=cast(Any, app))
     async with AsyncClient(transport=transport, base_url="http://test") as client:

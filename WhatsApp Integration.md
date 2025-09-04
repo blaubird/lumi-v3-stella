@@ -9,7 +9,7 @@ The `lumi-v3-stella` project integrates with WhatsApp Business API through a web
 - **Parameters:**
     - `hub.mode`: Must be `subscribe`.
     - `hub.challenge`: A unique string provided by Meta that needs to be echoed back.
-    - `hub.verify_token`: A token configured in the system (loaded from `VERIFY_TOKEN` environment variable) that must match the token configured in Meta's developer console.
+    - `hub.verify_token`: A token configured in the system (loaded from `WEBHOOK_VERIFY_TOKEN` environment variable) that must match the token configured in Meta's developer console.
 - **Process:** Upon receiving a `GET` request with the correct `mode` and `verify_token`, the system responds with the `hub.challenge` string, confirming the webhook's authenticity.
 
 ## Incoming Message Handling
@@ -26,7 +26,7 @@ The `lumi-v3-stella` project integrates with WhatsApp Business API through a web
 ## Key Components and Interactions
 
 - **`webhook.py`:** Contains the FastAPI routes for webhook verification (`GET /webhook`) and message handling (`POST /webhook`). It also includes the `process_message` function, which is the entry point for processing individual WhatsApp messages.
-- **Environment Variables:** Critical configuration details like `VERIFY_TOKEN`, `WH_TOKEN`, and `WH_PHONE_ID` are loaded from environment variables, ensuring secure and flexible deployment.
+- **Environment Variables:** Critical configuration details like `WEBHOOK_VERIFY_TOKEN`, `WH_TOKEN`, and `WH_PHONE_ID` are loaded from environment variables, ensuring secure and flexible deployment.
 - **Database (`db.py`, `models.py`):** The system interacts with a database to retrieve `Tenant` information based on the `phone_number_id` and likely to store incoming messages and other related data (e.g., `Message`, `Usage`, `FAQ`, `Appointment` models are imported).
 - **AI Integration (`ai.py`):** The `get_rag_response` function is imported, suggesting that AI-powered responses are generated based on the incoming message content.
 - **WhatsApp Service (`services/whatsapp.py`):** The `send_whatsapp_message` function is imported, indicating that the system uses a dedicated service to send messages back to WhatsApp users.

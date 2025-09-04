@@ -19,10 +19,11 @@ SENSITIVE_KEYS = [
     "secret",
     "admin_token",
     "X-Admin-Token",
-    "VERIFY_TOKEN",
+    "WEBHOOK_VERIFY_TOKEN",
     "WH_TOKEN",
     "OPENAI_API_KEY",
     "GOOGLE_SERVICE_JSON",
+    "SENTRY_DSN",
 ]
 
 

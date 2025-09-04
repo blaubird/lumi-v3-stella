@@ -54,7 +54,9 @@ async def query_rag(tenant_id: str, query: QueryRequest, db: Session = Depends(g
             return {
                 "answer": faq.answer,
                 "sources": [faq],
-                "token_count": len(faq.answer.split()),  # Simple token count estimation
+                "prompt_tokens": 0,
+                "completion_tokens": 0,
+                "total_tokens": 0,
             }
         else:
             # Log for debugging

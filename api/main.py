@@ -60,7 +60,7 @@ async def lifespan(app: FastAPI):
     try:
         yield
     finally:
-        await app.state.redis.aclose()
+        await cast(Any, app.state.redis).aclose()
 
     # Optional shutdown logs could be added here
 

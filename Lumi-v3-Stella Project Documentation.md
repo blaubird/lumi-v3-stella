@@ -53,7 +53,7 @@ The `api/` directory is the heart of the `lumi-v3-stella` application, containin
 - **`main.py`**: This is the primary entry point for the FastAPI application. It handles:
     - Application startup and shutdown events (`lifespan`).
     - Configuration of logging using Python's `logging` module, directing output to `sys.stdout`.
-    - Validation of essential environment variables (e.g., `OPENAI_API_KEY`, `VERIFY_TOKEN`, `DATABASE_URL`), ensuring the application has the necessary credentials to run. If any are missing, the application will exit.
+    - Validation of essential environment variables (e.g., `OPENAI_API_KEY`, `OPENAI_MODEL`, `WEBHOOK_VERIFY_TOKEN`, `DATABASE_URL`, `REDIS_URL`), ensuring the application has the necessary credentials to run. If any are missing, the application will exit.
     - Initialization of database connections and running Alembic migrations on startup to ensure the database schema is up-to-date.
     - Setting up CORS (Cross-Origin Resource Sharing) middleware to allow frontend applications from different origins to interact with the API.
     - Inclusion of various API routers (`webhook`, `admin`, `rag`) to organize endpoints.
@@ -122,11 +122,13 @@ Key environment variables required by `lumi-v3-stella` include:
 
 -   **`OPENAI_API_KEY`**: Your API key for accessing OpenAI services (or other compatible AI models).
 -   **`OPENAI_MODEL`**: Specifies the AI model to be used (e.g., `gpt-3.5-turbo`, `gpt-4`).
--   **`VERIFY_TOKEN`**: A token used for webhook verification with messaging platforms (e.g., WhatsApp).
+-   **`WEBHOOK_VERIFY_TOKEN`**: A token used for webhook verification with messaging platforms (e.g., WhatsApp).
 -   **`WH_TOKEN`**: The WhatsApp Business API token for sending messages.
 -   **`WH_PHONE_ID`**: The phone number ID associated with your WhatsApp Business Account.
 -   **`DATABASE_URL`**: The connection string for the PostgreSQL database (e.g., `postgresql://user:password@host:port/database`). This is used by SQLAlchemy to connect to the database.
 -   **`X_ADMIN_TOKEN`**: An administrative token used to secure sensitive API endpoints (e.g., those in `admin.py`).
+-   **`REDIS_URL`**: Connection string for Redis, used for caching.
+-   **`SENTRY_DSN`** *(optional)*: DSN for Sentry error reporting.
 
 These variables ensure that the application can connect to external services, authenticate securely, and adapt to different deployment environments without code changes.
 
@@ -257,7 +259,7 @@ The `api/` directory is the heart of the `lumi-v3-stella` application, containin
 - **`main.py`**: This is the primary entry point for the FastAPI application. It handles:
     - Application startup and shutdown events (`lifespan`).
     - Configuration of logging using Python's `logging` module, directing output to `sys.stdout`.
-    - Validation of essential environment variables (e.g., `OPENAI_API_KEY`, `VERIFY_TOKEN`, `DATABASE_URL`), ensuring the application has the necessary credentials to run. If any are missing, the application will exit.
+    - Validation of essential environment variables (e.g., `OPENAI_API_KEY`, `OPENAI_MODEL`, `WEBHOOK_VERIFY_TOKEN`, `DATABASE_URL`, `REDIS_URL`), ensuring the application has the necessary credentials to run. If any are missing, the application will exit.
     - Initialization of database connections and running Alembic migrations on startup to ensure the database schema is up-to-date.
     - Setting up CORS (Cross-Origin Resource Sharing) middleware to allow frontend applications from different origins to interact with the API.
     - Inclusion of various API routers (`webhook`, `admin`, `rag`) to organize endpoints.
@@ -326,11 +328,13 @@ Key environment variables required by `lumi-v3-stella` include:
 
 -   **`OPENAI_API_KEY`**: Your API key for accessing OpenAI services (or other compatible AI models).
 -   **`OPENAI_MODEL`**: Specifies the AI model to be used (e.g., `gpt-3.5-turbo`, `gpt-4`).
--   **`VERIFY_TOKEN`**: A token used for webhook verification with messaging platforms (e.g., WhatsApp).
+-   **`WEBHOOK_VERIFY_TOKEN`**: A token used for webhook verification with messaging platforms (e.g., WhatsApp).
 -   **`WH_TOKEN`**: The WhatsApp Business API token for sending messages.
 -   **`WH_PHONE_ID`**: The phone number ID associated with your WhatsApp Business Account.
 -   **`DATABASE_URL`**: The connection string for the PostgreSQL database (e.g., `postgresql://user:password@host:port/database`). This is used by SQLAlchemy to connect to the database.
 -   **`X_ADMIN_TOKEN`**: An administrative token used to secure sensitive API endpoints (e.g., those in `admin.py`).
+-   **`REDIS_URL`**: Connection string for Redis, used for caching.
+-   **`SENTRY_DSN`** *(optional)*: DSN for Sentry error reporting.
 
 These variables ensure that the application can connect to external services, authenticate securely, and adapt to different deployment environments without code changes.
 

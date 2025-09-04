@@ -1,8 +1,11 @@
-import os
 import logging
 from typing import Dict, Any, List, Optional
+
+import tiktoken
 from openai import AsyncOpenAI
 from sqlalchemy.orm import Session
+
+from config import settings
 from models import FAQ
 from logging_utils import get_logger
 
@@ -11,15 +14,14 @@ logger = get_logger(__name__)
 # Add specific logger for AI operations
 logger_ai = logging.getLogger("api.ai")
 
+if not (hasattr(tiktoken, "encoding_for_model") and hasattr(tiktoken, "get_encoding")):
+    raise RuntimeError("tiktoken upgrade required: missing encoding utilities")
+
 # Initialize OpenAI client globally to ensure a single instance
 # This helps prevent memory leaks and resource exhaustion from creating multiple clients.
 client = None
 try:
-    api_key = os.getenv("OPENAI_API_KEY")
-    if api_key:
-        client = AsyncOpenAI(api_key=api_key)
-    else:
-        logger.warning("OPENAI_API_KEY not found. OpenAI client not initialized.")
+    client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
 except Exception as e:
     logger.error(
         "Failed to initialize OpenAI client", extra={"error": str(e)}, exc_info=e
@@ -27,9 +29,19 @@ except Exception as e:
 
 # Model names
 EMBEDDING_MODEL_NAME = "text-embedding-ada-002"
-MODEL_NAME = os.getenv(
-    "OPENAI_MODEL", "ft:gpt-4.1-nano-2025-04-14:luminiteq:flora:Bdezn8Rp"
-)
+MODEL_NAME = settings.OPENAI_MODEL
+
+
+def get_encoding(model: str) -> tiktoken.Encoding:
+    try:
+        return tiktoken.encoding_for_model(model)
+    except Exception:
+        return tiktoken.get_encoding("cl100k_base")
+
+
+def count_tokens(text: str, model: str) -> int:
+    enc = get_encoding(model)
+    return len(enc.encode(text or ""))
 
 
 def track_openai_call(model: str, endpoint: str):
@@ -235,20 +247,30 @@ async def get_rag_response(
         return {
             "answer": "Извините, временная ошибка. Попробуйте позже.",
             "sources": [],
-            "token_count": 0,
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
         }
 
-    # Calculate token count (simplified estimation)
-    # In a real implementation, this would come from the OpenAI API response
-    token_count = len(prompt.split()) + len(llm_answer.split())
+    prompt_tokens = count_tokens(prompt, MODEL_NAME)
+    completion_tokens = count_tokens(llm_answer, MODEL_NAME)
+    total_tokens = prompt_tokens + completion_tokens
 
     logger.info(
         "RAG: Generated response",
         extra={
             "tenant_id": tenant_id,
             "response_length": len(llm_answer),
-            "token_count": token_count,
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "total_tokens": total_tokens,
         },
     )
 
-    return {"answer": llm_answer, "sources": sources, "token_count": token_count}
+    return {
+        "answer": llm_answer,
+        "sources": sources,
+        "prompt_tokens": prompt_tokens,
+        "completion_tokens": completion_tokens,
+        "total_tokens": total_tokens,
+    }

@@ -29,7 +29,7 @@ class AiHandler:
             return False
 
         answer = response["answer"]
-        token_count = response.get("token_count", 0)
+        token_count = response.get("total_tokens", 0)
 
         bot_message = Message(
             tenant_id=ctx["tenant_id"],
