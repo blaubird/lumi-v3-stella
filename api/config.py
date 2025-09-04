@@ -11,6 +11,8 @@ class Settings(BaseSettings):
 
     DATABASE_URL: str
 
+    REDIS_URL: str
+
     OPENAI_API_KEY: str
     OPENAI_MODEL: str = "ft:gpt-4.1-nano-2025-04-14:luminiteq:flora:Bdezn8Rp"
     EMBEDDING_MODEL_NAME: str = "text-embedding-ada-002"

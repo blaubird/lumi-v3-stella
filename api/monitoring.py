@@ -26,6 +26,20 @@ REQUEST_LATENCY = Histogram(
     registry=registry,
 )
 
+CACHE_HIT = Counter(
+    "cache_hit_total",
+    "Total cache hits",
+    ["bucket"],
+    registry=registry,
+)
+
+CACHE_MISS = Counter(
+    "cache_miss_total",
+    "Total cache misses",
+    ["bucket"],
+    registry=registry,
+)
+
 
 def setup_metrics(app: FastAPI):
     """
