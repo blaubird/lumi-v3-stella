@@ -1,13 +1,13 @@
 from datetime import datetime, timedelta
 from typing import Any, cast
 from sqlalchemy.orm import Session
-from database import SessionLocal
-from models import Appointment, Tenant
-from services.whatsapp import send_whatsapp_message
-from services.calendar import create_event
-from utils.ics_generator import generate_ics
-from utils.i18n import tr
-from logging_utils import get_logger
+from api.database import SessionLocal
+from api.models import Appointment, Tenant
+from api.services.whatsapp import send_whatsapp_message
+from api.services.calendar import create_event
+from api.utils.ics_generator import generate_ics
+from api.utils.i18n import tr
+from api.logging_utils import get_logger
 
 logger = get_logger(__name__)
 

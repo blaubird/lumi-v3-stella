@@ -1,8 +1,8 @@
 import os
 from fastapi import APIRouter, Request
-from logging_utils import get_logger
-from services.instagram import send_instagram_message
-from utils.i18n import detect_lang, tr
+from api.logging_utils import get_logger
+from api.services.instagram import send_instagram_message
+from api.utils.i18n import detect_lang, tr
 
 router = APIRouter(tags=["Instagram"])
 logger = get_logger(__name__)

@@ -5,9 +5,9 @@ import tiktoken
 from openai import AsyncOpenAI
 from sqlalchemy.orm import Session
 
-from config import settings
-from logging_utils import get_logger
-from models import FAQ
+from api.config import settings
+from api.logging_utils import get_logger
+from api.models import FAQ
 
 # Initialize logger
 logger = get_logger(__name__)

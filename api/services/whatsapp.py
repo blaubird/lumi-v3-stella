@@ -1,6 +1,6 @@
 import aiohttp
 import base64
-from logging_utils import get_logger
+from api.logging_utils import get_logger
 
 logger = get_logger(__name__)
 

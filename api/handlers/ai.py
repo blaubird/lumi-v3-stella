@@ -4,9 +4,13 @@ from __future__ import annotations
 
 from typing import cast
 
-from api.ai import get_rag_response
-from logging_utils import get_logger
-from models import Message, Usage
+try:
+    from api.ai import get_rag_response
+except ModuleNotFoundError:
+    # fallback if legacy layout is used locally
+    from ai import get_rag_response
+from api.logging_utils import get_logger
+from api.models import Message, Usage
 
 from .base import Context
 

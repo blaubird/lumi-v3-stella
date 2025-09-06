@@ -7,14 +7,14 @@ from fastapi import APIRouter, Depends, Query, Request, Response
 from redis.asyncio import Redis
 from sqlalchemy.orm import Session
 
-from cache import get_cached_tenant
-from config import settings
-from database import SessionLocal
-from handlers import HANDLERS, Context, run_pipeline
-from logging_utils import get_logger
-from models import Message, Tenant, Usage
-from services.whatsapp import send_whatsapp_message
-from utils.i18n import detect_lang
+from api.cache import get_cached_tenant
+from api.config import settings
+from api.database import SessionLocal
+from api.handlers import HANDLERS, Context, run_pipeline
+from api.logging_utils import get_logger
+from api.models import Message, Tenant, Usage
+from api.services.whatsapp import send_whatsapp_message
+from api.utils.i18n import detect_lang
 
 logger = get_logger(__name__)
 router = APIRouter(tags=["Webhook"])
