@@ -2,11 +2,11 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from typing import cast
-from deps import get_db
-from models import Tenant, FAQ
-from schemas.rag import QueryRequest, QueryResponse
-from ai import get_rag_response
-from logging_utils import get_logger
+from api.deps import get_db
+from api.models import Tenant, FAQ
+from api.schemas.rag import QueryRequest, QueryResponse
+from api.ai import get_rag_response
+from api.logging_utils import get_logger
 
 # Initialize logger
 logger = get_logger(__name__)

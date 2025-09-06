@@ -1,8 +1,8 @@
 import os
 from fastapi import APIRouter, Request
-from logging_utils import get_logger
-from services.telegram import send_telegram_message
-from utils.i18n import detect_lang, tr
+from api.logging_utils import get_logger
+from api.services.telegram import send_telegram_message
+from api.utils.i18n import detect_lang, tr
 
 router = APIRouter(tags=["Telegram"])
 logger = get_logger(__name__)

@@ -3,12 +3,12 @@ from typing import List, Optional, cast
 from openai import AsyncOpenAI
 from openai.types.chat import ChatCompletionMessageParam
 
-from ai import find_relevant_faqs
-from config import settings
-from database import SessionLocal
-from logging_utils import get_logger
-from models import Message, Tenant, Usage
-from services.whatsapp import send_whatsapp_message
+from api.ai import find_relevant_faqs
+from api.config import settings
+from api.database import SessionLocal
+from api.logging_utils import get_logger
+from api.models import Message, Tenant, Usage
+from api.services.whatsapp import send_whatsapp_message
 
 logger = get_logger(__name__)
 logger_ai = get_logger("api.ai")

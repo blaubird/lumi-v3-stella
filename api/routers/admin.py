@@ -2,9 +2,9 @@ from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from typing import List, Any, cast
-from deps import get_db
-from models import Tenant, Message, FAQ, Usage
-from schemas.admin import (
+from api.deps import get_db, verify_admin_token
+from api.models import Tenant, Message, FAQ, Usage
+from api.schemas.admin import (
     TenantCreate,
     TenantUpdate,
     TenantResponse,
@@ -15,9 +15,8 @@ from schemas.admin import (
     BulkFAQImportResponse,
     UsageStatsResponse,
 )
-from deps import verify_admin_token
-from ai import generate_embedding
-from logging_utils import get_logger
+from api.ai import generate_embedding
+from api.logging_utils import get_logger
 
 # Initialize logger
 logger = get_logger(__name__)
