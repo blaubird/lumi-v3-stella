@@ -22,7 +22,7 @@ class FaqHandler:
             return False
 
         answer = cast(str, faq["answer"])
-        token_count = 0
+        token_count = len(answer.split())
 
         bot_message = Message(
             tenant_id=ctx["tenant_id"],

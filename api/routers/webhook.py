@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from datetime import datetime, timezone
 from typing import Any, Dict, Generator, cast
 
@@ -8,7 +9,6 @@ from redis.asyncio import Redis
 from sqlalchemy.orm import Session
 
 from cache import get_cached_tenant
-from config import settings
 from database import SessionLocal
 from handlers import HANDLERS, Context, run_pipeline
 from logging_utils import get_logger
@@ -17,6 +17,7 @@ from services.whatsapp import send_whatsapp_message
 from utils.i18n import detect_lang
 
 logger = get_logger(__name__)
+VERIFY_TOKEN = os.getenv("VERIFY_TOKEN", "lumi-verify-6969")
 router = APIRouter(tags=["Webhook"])
 
 
@@ -38,7 +39,7 @@ async def verify_webhook(
         "Webhook verification request received",
         extra={"mode": mode, "token_provided": bool(verify_token)},
     )
-    if mode == "subscribe" and verify_token == settings.WEBHOOK_VERIFY_TOKEN:
+    if mode == "subscribe" and verify_token == VERIFY_TOKEN:
         logger.info("Webhook verified successfully")
         return Response(content=challenge, media_type="text/plain")
     logger.warning("Invalid webhook verification attempt")
@@ -151,8 +152,6 @@ async def process_message(
             "reply": None,
             "attachment": None,
             "tenant": tenant,
-            "user_message": user_message,
-            "inbound_usage": inbound_usage,
         }
 
         await run_pipeline(ctx, HANDLERS)
