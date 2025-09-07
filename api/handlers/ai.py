@@ -29,25 +29,20 @@ class AiHandler:
             return False
 
         answer = response["answer"]
-        prompt_tokens = response.get("prompt_tokens", 0)
-        completion_tokens = response.get("completion_tokens", 0)
-        total_tokens = response.get("total_tokens", 0)
-
-        ctx["user_message"].tokens = prompt_tokens
-        ctx["inbound_usage"].tokens = prompt_tokens
+        token_count = response.get("token_count", 0)
 
         bot_message = Message(
             tenant_id=ctx["tenant_id"],
             role="assistant",
             text=answer,
-            tokens=completion_tokens,
+            tokens=token_count,
         )
         ctx["db"].add(bot_message)
 
         outbound_usage = Usage(
             tenant_id=ctx["tenant_id"],
             direction="outbound",
-            tokens=total_tokens,
+            tokens=token_count,
             msg_ts=ctx["ts"],
         )
         ctx["db"].add(outbound_usage)

@@ -51,9 +51,3 @@ yp1pcw-codex/fix-crash-related-to-pydantic-import
 - Added pytest with async health check to guard /healthz.
 - Introduced handler pipeline (FAQ → Booking → AI) for webhook processing.
 - Centralised reply send and single commit per message.
-
-## Tiktoken & secrets cleanup
-- Centralised secret management via Pydantic Settings; required env vars now fail fast.
-- Replaced `os.getenv` defaults and routed webhook/admin secrets through settings.
-- Integrated `tiktoken` with runtime guards and helper functions for token counting.
-- AI handler records prompt/completion/total tokens; non-AI flows log zero usage.

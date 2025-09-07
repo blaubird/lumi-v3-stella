@@ -6,8 +6,6 @@ from typing import Any, Dict, List, Optional, Protocol, TypedDict
 from redis.asyncio import Redis
 from sqlalchemy.orm import Session
 
-from models import Message, Usage
-
 
 class Context(TypedDict):
     message: Dict[str, Any]
@@ -21,8 +19,6 @@ class Context(TypedDict):
     reply: Optional[str]
     attachment: Optional[bytes]
     tenant: Dict[str, Any]
-    user_message: Message
-    inbound_usage: Usage
 
 
 class Handler(Protocol):

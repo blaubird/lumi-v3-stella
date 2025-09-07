@@ -52,7 +52,7 @@ class BookingHandler:
         reply = (
             f"✅ booked for {starts_at.strftime('%d/%m %H:%M')}. You’ll get a reminder."
         )
-        token_count = 0
+        token_count = len(reply.split())
 
         bot_message = Message(
             tenant_id=ctx["tenant_id"],

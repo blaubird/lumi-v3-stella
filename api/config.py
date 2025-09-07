@@ -1,4 +1,3 @@
-from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -10,26 +9,23 @@ class Settings(BaseSettings):
     PROJECT_NAME: str = "Lumi API"
     PROJECT_VERSION: str = "0.1.0"
 
-    DATABASE_URL: str = Field(..., alias="DATABASE_URL")
+    DATABASE_URL: str
 
-    REDIS_URL: str = Field(..., alias="REDIS_URL")
+    REDIS_URL: str
 
-    OPENAI_API_KEY: str = Field(..., alias="OPENAI_API_KEY")
-    OPENAI_MODEL: str = Field(..., alias="OPENAI_MODEL")
-    EMBEDDING_MODEL_NAME: str = Field("text-embedding-ada-002", alias="EMBEDDING_MODEL_NAME")
+    OPENAI_API_KEY: str
+    OPENAI_MODEL: str = "ft:gpt-4.1-nano-2025-04-14:luminiteq:flora:Bdezn8Rp"
+    EMBEDDING_MODEL_NAME: str = "text-embedding-ada-002"
 
-    WEBHOOK_VERIFY_TOKEN: str = Field(..., alias="WEBHOOK_VERIFY_TOKEN")
-    WH_TOKEN: str = Field(..., alias="WH_TOKEN")
-    WH_PHONE_ID: str = Field(..., alias="WH_PHONE_ID")
+    VERIFY_TOKEN: str
+    WH_TOKEN: str
+    WH_PHONE_ID: str
 
-    X_ADMIN_TOKEN: str = Field(..., alias="X_ADMIN_TOKEN")
-    SENTRY_DSN: str | None = Field(default=None, alias="SENTRY_DSN")
+    X_ADMIN_TOKEN: str
 
-    CORS_ALLOWED_ORIGINS: str = Field(
-        "https://luminiteq.com,https://api.luminiteq.com", alias="CORS_ALLOWED_ORIGINS"
-    )
+    CORS_ALLOWED_ORIGINS: str = "https://luminiteq.com,https://api.luminiteq.com"
 
-    LOG_LEVEL: str = Field("INFO", alias="LOG_LEVEL")
+    LOG_LEVEL: str = "INFO"
 
 
 settings = Settings()  # type: ignore[call-arg]
