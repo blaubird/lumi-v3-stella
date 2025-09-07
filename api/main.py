@@ -9,7 +9,6 @@ from monitoring import setup_metrics, add_health_check_endpoint
 from logging_utils import configure_basic_logging, get_logger, request_context
 from alembic.config import Config as AlembicConfig
 from alembic import command
-from redis.asyncio import from_url as redis_from_url
 from contextlib import asynccontextmanager
 from fastapi.middleware.cors import CORSMiddleware
 from config import settings  # Import settings
@@ -36,31 +35,13 @@ async def lifespan(app: FastAPI):
     setup_metrics(app)
     logger.info("Metrics setup complete")
 
-    logger.info("Initializing Redis")
-    app.state.redis = redis_from_url(
-        settings.REDIS_URL,
-        decode_responses=True,
-        encoding="utf-8",
-        max_connections=32,
-        socket_connect_timeout=5,
-        socket_timeout=5,
-        health_check_interval=30,
-    )
-    try:
-        await app.state.redis.ping()
-    except Exception as e:
-        logger.warning("Redis ping failed", extra={"error": str(e)}, exc_info=True)
-
     # Add comprehensive health check endpoint
     add_health_check_endpoint(app)
     logger.info("Health check endpoint added")
 
     logger.info("Application startup finished")
 
-    try:
-        yield
-    finally:
-        await app.state.redis.aclose()
+    yield
 
     # Optional shutdown logs could be added here
 
@@ -106,18 +87,6 @@ init_scheduler(app)
 
 # Initialize logger
 log = get_logger("api")
-
-
-@app.get("/healthz", include_in_schema=False)
-async def healthz(request: Request):
-    redis_ok = True
-    try:
-        await request.app.state.redis.ping()
-    except Exception as e:
-        logger.warning("Health check degraded", extra={"error": str(e)})
-        redis_ok = False
-    status_str = "ok" if redis_ok else "degraded"
-    return {"status": status_str, "redis": redis_ok}
 
 
 @app.get("/docs", response_class=HTMLResponse, include_in_schema=False)
