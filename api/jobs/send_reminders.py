@@ -2,11 +2,11 @@ import os
 from datetime import datetime, timedelta
 from typing import Any, cast
 from sqlalchemy.orm import Session
-from api.database import SessionLocal
-from api.models import Appointment, Tenant
-from api.services.whatsapp import send_whatsapp_message
-from api.utils.i18n import tr
-from api.logging_utils import get_logger
+from database import SessionLocal
+from models import Appointment, Tenant
+from services.whatsapp import send_whatsapp_message
+from utils.i18n import tr
+from logging_utils import get_logger
 
 REMINDER_OFFSET_MIN = int(os.getenv("REMINDER_OFFSET_MIN", "60"))
 logger = get_logger(__name__)

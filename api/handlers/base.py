@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Optional, Protocol, TypedDict
 from redis.asyncio import Redis
 from sqlalchemy.orm import Session
 
-from api.models import Message, Usage
+from models import Message, Usage
 
 
 class Context(TypedDict):

@@ -1,6 +1,7 @@
 from datetime import datetime
 from typing import Optional
-from api.logging_utils import get_logger
+from logging_utils import get_logger
+from utils.google_calendar import create_event as google_create_event
 
 log = get_logger(__name__)
 
@@ -13,8 +14,6 @@ def create_event(
     guests: Optional[list[str]] = None,
 ) -> str:
     try:
-        from api.utils.google_calendar import create_event as google_create_event
-
         return google_create_event(summary, starts_at, ends_at, calendar_id, guests)
     except KeyError:
         raise RuntimeError("Google calendar credentials missing")

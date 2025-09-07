@@ -2,29 +2,28 @@
 
 # ruff: noqa: E402
 import os
+import sys
+
+ROOT = os.path.dirname(os.path.abspath(__file__))
+PROJECT_ROOT = os.path.dirname(ROOT)
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
 
 from typing import Any, cast
 from fastapi import FastAPI, Request, status
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.openapi.docs import get_swagger_ui_html
-from api.routers import (
-    webhook,
-    admin,
-    rag,
-    telegram_webhook,
-    instagram_webhook,
-)
-from api.jobs.scheduler import init_scheduler
-from api.monitoring import setup_metrics, add_health_check_endpoint
-from api.logging_utils import configure_basic_logging, get_logger, request_context
+from routers import webhook, admin, rag, telegram_webhook, instagram_webhook
+from jobs.scheduler import init_scheduler
+from monitoring import setup_metrics, add_health_check_endpoint
+from logging_utils import configure_basic_logging, get_logger, request_context
 from alembic.config import Config as AlembicConfig
 from alembic import command
-from pathlib import Path
 from redis.asyncio import from_url as redis_from_url
 from contextlib import asynccontextmanager
 from fastapi.middleware.cors import CORSMiddleware
-from api.config import settings  # Import settings
-from api.schemas.common import ErrorResponse  # Import ErrorResponse schema
+from config import settings  # Import settings
+from schemas.common import ErrorResponse  # Import ErrorResponse schema
 
 configure_basic_logging()
 logger = get_logger(__name__)
@@ -38,9 +37,7 @@ async def lifespan(app: FastAPI):
 
     # Run Alembic migrations at startup
     logger.info("Running Alembic migrations...")
-    root_path = Path(__file__).resolve().parent
-    alembic_cfg = AlembicConfig(str(root_path / "alembic.ini"))
-    alembic_cfg.set_main_option("script_location", str(root_path / "alembic"))
+    alembic_cfg = AlembicConfig("alembic.ini")
     command.upgrade(alembic_cfg, "head")
     logger.info("Migrations completed")
 

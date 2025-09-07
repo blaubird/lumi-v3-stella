@@ -8,7 +8,7 @@ from prometheus_client import (
     CONTENT_TYPE_LATEST,
 )
 from fastapi import FastAPI, Request, Response
-from api.logging_utils import get_logger
+from logging_utils import get_logger
 from typing import Any, cast
 
 # Initialize logger

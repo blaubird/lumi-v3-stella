@@ -6,9 +6,9 @@ from redis.asyncio import Redis
 from redis.exceptions import RedisError
 from sqlalchemy.orm import Session
 
-from api.logging_utils import get_logger
-from api.monitoring import CACHE_HIT, CACHE_MISS
-from api.models import FAQ, Tenant
+from logging_utils import get_logger
+from monitoring import CACHE_HIT, CACHE_MISS
+from models import FAQ, Tenant
 
 TENANT_TTL = 60
 FAQ_TTL = 300
