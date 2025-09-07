@@ -3,8 +3,10 @@ import json
 from typing import Dict, Any, cast
 from fastapi import APIRouter, Depends, Request, Query, Response
 from sqlalchemy.orm import Session
+from redis.asyncio import Redis
 from database import SessionLocal
-from models import Tenant, Message, Usage, FAQ, Appointment
+from models import Tenant, Message, Usage, Appointment
+from cache import get_cached_faqs, get_cached_tenant
 import re
 from ai import get_rag_response
 from services.whatsapp import send_whatsapp_message
@@ -83,17 +85,28 @@ async def webhook_handler(request: Request, db: Session = Depends(get_db)):
                 phone_id = metadata.get("phone_number_id")
 
                 # Find tenant by phone_id
-                tenant = db.query(Tenant).filter(Tenant.phone_id == phone_id).first()
-                if not tenant:
+                tenant_db = db.query(Tenant).filter(Tenant.phone_id == phone_id).first()
+                if not tenant_db:
                     logger.warning(
                         "Tenant not found for webhook", extra={"phone_id": phone_id}
+                    )
+                    continue
+
+                tenant = await get_cached_tenant(
+                    request.app.state.redis, db, cast(str, tenant_db.id)
+                )
+                if not tenant:
+                    logger.warning(
+                        "Tenant config not found", extra={"tenant_id": tenant_db.id}
                     )
                     continue
 
                 # Process messages
                 for message in value.get("messages", []):
                     if message.get("type") == "text":
-                        await process_message(db, tenant, message)
+                        await process_message(
+                            request.app.state.redis, db, tenant, message
+                        )
     except Exception as e:
         # Log the error but still return success
         logger.error(
@@ -105,7 +118,9 @@ async def webhook_handler(request: Request, db: Session = Depends(get_db)):
     return {"status": "success"}
 
 
-async def process_message(db: Session, tenant: Tenant, message: Dict[str, Any]):
+async def process_message(
+    redis: Redis, db: Session, tenant: Dict[str, Any], message: Dict[str, Any]
+):
     """
     Process a message from WhatsApp
     """
@@ -126,7 +141,7 @@ async def process_message(db: Session, tenant: Tenant, message: Dict[str, Any]):
         logger.info(
             "Processing message",
             extra={
-                "tenant_id": tenant.id,
+                "tenant_id": tenant["id"],
                 "message_id": message_id,
                 "from": from_number,
                 "text_length": len(text),
@@ -141,7 +156,7 @@ async def process_message(db: Session, tenant: Tenant, message: Dict[str, Any]):
 
         # Save user message
         user_message = Message(
-            tenant_id=tenant.id,
+            tenant_id=tenant["id"],
             wa_msg_id=message_id,
             role="inbound",
             text=text,
@@ -151,7 +166,7 @@ async def process_message(db: Session, tenant: Tenant, message: Dict[str, Any]):
 
         # Track inbound message usage (with 0 tokens as specified)
         usage_record = Usage(
-            tenant_id=tenant.id,
+            tenant_id=tenant["id"],
             direction="inbound",
             tokens=0,
             msg_ts=ts,  # Use converted datetime
@@ -189,7 +204,7 @@ async def process_message(db: Session, tenant: Tenant, message: Dict[str, Any]):
 
             if starts_at:
                 appt = Appointment(
-                    tenant_id=tenant.id,
+                    tenant_id=tenant["id"],
                     customer_phone=from_number,
                     customer_email=None,
                     starts_at=starts_at,
@@ -207,7 +222,7 @@ async def process_message(db: Session, tenant: Tenant, message: Dict[str, Any]):
                 token_count = len(reply.split())
 
                 bot_message = Message(
-                    tenant_id=tenant.id,
+                    tenant_id=tenant["id"],
                     role="assistant",
                     text=reply,
                     tokens=token_count,
@@ -215,7 +230,7 @@ async def process_message(db: Session, tenant: Tenant, message: Dict[str, Any]):
                 db.add(bot_message)
 
                 outbound_usage = Usage(
-                    tenant_id=cast(str, tenant.id),
+                    tenant_id=cast(str, tenant["id"]),
                     direction="outbound",
                     tokens=token_count,
                     msg_ts=ts,
@@ -225,8 +240,8 @@ async def process_message(db: Session, tenant: Tenant, message: Dict[str, Any]):
 
                 ics = generate_ics("Appointment", starts_at)
                 await send_whatsapp_message(
-                    phone_id=cast(str, tenant.phone_id),
-                    token=cast(str, tenant.wh_token),
+                    phone_id=cast(str, tenant["phone_id"]),
+                    token=cast(str, tenant["wh_token"]),
                     recipient=cast(str, from_number),
                     message=reply,
                     attachment=ics,
@@ -234,29 +249,21 @@ async def process_message(db: Session, tenant: Tenant, message: Dict[str, Any]):
                 return
 
         # Check for exact FAQ match before using RAG
-        # Using .ilike() for case-insensitive comparison to prevent SQL injection
-        faq = (
-            db.query(FAQ)
-            .filter(FAQ.question.ilike(text), FAQ.tenant_id == cast(str, tenant.id))
-            .first()
-        )
+        faqs = await get_cached_faqs(redis, db, cast(str, tenant["id"]))
+        faq = next((f for f in faqs if f["question"].lower() == text.lower()), None)
 
         if faq:
             logger.info(
                 "Exact FAQ match found",
-                extra={
-                    "tenant_id": cast(str, tenant.id),
-                    "faq_id": faq.id,
-                    "question": faq.question,
-                },
+                extra={"tenant_id": tenant["id"], "question": faq["question"]},
             )
 
-            answer = cast(str, faq.answer)
+            answer = cast(str, faq["answer"])
             token_count = len(answer.split())
 
             # Save bot message
             bot_message = Message(
-                tenant_id=cast(str, tenant.id),
+                tenant_id=tenant["id"],
                 role="assistant",
                 text=answer,
                 tokens=token_count,
@@ -265,7 +272,7 @@ async def process_message(db: Session, tenant: Tenant, message: Dict[str, Any]):
 
             # Track outbound message usage
             outbound_usage = Usage(
-                tenant_id=cast(str, tenant.id),
+                tenant_id=tenant["id"],
                 direction="outbound",
                 tokens=token_count,
                 msg_ts=ts,
@@ -275,8 +282,8 @@ async def process_message(db: Session, tenant: Tenant, message: Dict[str, Any]):
 
             # Send response via WhatsApp
             await send_whatsapp_message(
-                phone_id=cast(str, tenant.phone_id),
-                token=cast(str, tenant.wh_token),
+                phone_id=cast(str, tenant["phone_id"]),
+                token=cast(str, tenant["wh_token"]),
                 recipient=cast(str, from_number),
                 message=answer,
             )
@@ -284,7 +291,7 @@ async def process_message(db: Session, tenant: Tenant, message: Dict[str, Any]):
             logger.info(
                 "FAQ match response sent",
                 extra={
-                    "tenant_id": cast(str, tenant.id),
+                    "tenant_id": tenant["id"],
                     "to": from_number,
                     "response_length": len(answer),
                     "token_count": token_count,
@@ -295,16 +302,15 @@ async def process_message(db: Session, tenant: Tenant, message: Dict[str, Any]):
             # Log for debugging
             logger.debug(
                 "No exact FAQ match found",
-                extra={"tenant_id": cast(str, tenant.id), "text": text},
+                extra={"tenant_id": tenant["id"], "text": text},
             )
-
         # Generate response using RAG if no exact match
         try:
             response = await get_rag_response(
                 db=db,
-                tenant_id=cast(str, tenant.id),
+                tenant_id=cast(str, tenant["id"]),
                 user_query=text,
-                system_prompt=cast(str, tenant.system_prompt),
+                system_prompt=cast(str, tenant["system_prompt"]),
             )
 
             answer = response["answer"]
@@ -314,7 +320,7 @@ async def process_message(db: Session, tenant: Tenant, message: Dict[str, Any]):
 
             # Save bot message
             bot_message = Message(
-                tenant_id=cast(str, tenant.id),
+                tenant_id=cast(str, tenant["id"]),
                 role="assistant",
                 text=answer,
                 tokens=token_count,
@@ -323,7 +329,7 @@ async def process_message(db: Session, tenant: Tenant, message: Dict[str, Any]):
 
             # Track outbound message usage with actual token count
             outbound_usage = Usage(
-                tenant_id=cast(str, tenant.id),
+                tenant_id=cast(str, tenant["id"]),
                 direction="outbound",
                 tokens=token_count,
                 msg_ts=ts,  # Use converted datetime
@@ -333,8 +339,8 @@ async def process_message(db: Session, tenant: Tenant, message: Dict[str, Any]):
 
             # Send response via WhatsApp using the send_whatsapp_message function
             await send_whatsapp_message(
-                phone_id=cast(str, tenant.phone_id),
-                token=cast(str, tenant.wh_token),
+                phone_id=cast(str, tenant["phone_id"]),
+                token=cast(str, tenant["wh_token"]),
                 recipient=cast(str, from_number),
                 message=answer,
             )
@@ -342,7 +348,7 @@ async def process_message(db: Session, tenant: Tenant, message: Dict[str, Any]):
             logger.info(
                 "Response sent",
                 extra={
-                    "tenant_id": cast(str, tenant.id),
+                    "tenant_id": cast(str, tenant["id"]),
                     "to": from_number,
                     "response_length": len(answer),
                     "token_count": token_count,
@@ -352,7 +358,7 @@ async def process_message(db: Session, tenant: Tenant, message: Dict[str, Any]):
             logger.error(
                 "Error processing message response",
                 extra={
-                    "tenant_id": cast(str, tenant.id),
+                    "tenant_id": cast(str, tenant["id"]),
                     "message_id": message_id,
                     "error": str(e),
                 },
