@@ -3,10 +3,10 @@ from __future__ import annotations
 import re
 from datetime import datetime, timezone
 
-from api.logging_utils import get_logger
-from api.models import Appointment, Message, Usage
-from api.utils.ics_generator import generate_ics
-from api.utils.i18n import detect_lang
+from logging_utils import get_logger
+from models import Appointment, Message, Usage
+from utils.ics_generator import generate_ics
+from utils.i18n import detect_lang
 
 from .base import Context
 

@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from typing import cast
 
-from api.cache import get_cached_faqs
-from api.logging_utils import get_logger
-from api.models import Message, Usage
+from cache import get_cached_faqs
+from logging_utils import get_logger
+from models import Message, Usage
 
 from .base import Context
 

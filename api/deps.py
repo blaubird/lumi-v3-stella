@@ -1,9 +1,9 @@
 from fastapi import HTTPException, Header
 from sqlalchemy.orm import Session
 from typing import Generator
-from api.database import SessionLocal
-from api.logging_utils import get_logger
-from api.config import settings  # Import settings
+from database import SessionLocal
+from logging_utils import get_logger
+from config import settings  # Import settings
 
 # Initialize logger
 logger = get_logger(__name__)
