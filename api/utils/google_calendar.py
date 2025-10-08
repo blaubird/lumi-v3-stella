@@ -1,16 +1,15 @@
+
 import json
 import os
 from datetime import datetime
+from functools import lru_cache
+from json import JSONDecodeError
+from typing import Any
+
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 
 _SCOPES = ["https://www.googleapis.com/auth/calendar"]
-_creds = service_account.Credentials.from_service_account_info(
-    json.loads(os.environ["GOOGLE_SERVICE_JSON"]), scopes=_SCOPES
-)
-_svc = build("calendar", "v3", credentials=_creds, cache_discovery=False)
-_DEFAULT_CAL = os.getenv("DEFAULT_CALENDAR_ID")
-
 
 def create_event(
     summary: str,
@@ -26,6 +25,9 @@ def create_event(
     }
     if guests:
         body["attendees"] = [{"email": g} for g in guests]
-    cal_id = calendar_id or _DEFAULT_CAL
-    ev = _svc.events().insert(calendarId=cal_id, body=body).execute()
-    return ev["id"]
+    cal_id = calendar_id or _get_default_calendar_id()
+    service = _get_calendar_service()
+    event: dict[str, Any] = (
+        service.events().insert(calendarId=cal_id, body=body).execute()
+    )
+    return event["id"]

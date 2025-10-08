@@ -51,3 +51,4 @@ yp1pcw-codex/fix-crash-related-to-pydantic-import
 - Added missing FastAPI/SQLAlchemy imports in `deps.py` to restore admin auth guards.
 - Ensured FAQ embedding tasks open their own sessions and always schedule when FAQ creation succeeds.
 - Moved background embedding scheduling outside error paths and added defensive rollbacks/closures.
+
