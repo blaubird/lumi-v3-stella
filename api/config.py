@@ -14,8 +14,13 @@ class Settings(BaseSettings):
     REDIS_URL: str
 
     OPENAI_API_KEY: str
-    OPENAI_MODEL: str = "ft:gpt-4.1-nano-2025-04-14:luminiteq:flora:Bdezn8Rp"
-    EMBEDDING_MODEL_NAME: str = "text-embedding-ada-002"
+    OPENAI_MODEL: str = "gpt-4o-mini"
+    OPENAI_EMBEDDING_MODEL: str = "text-embedding-3-small"
+    AI_REQUEST_TIMEOUT_SECONDS: float = 30.0
+    AI_MAX_TOKENS_COMPLETION: int = 512
+    AI_TEMPERATURE: float = 0.2
+    AI_ENABLE: bool | None = None
+    OPENAI_BASE_URL: str | None = None
 
     VERIFY_TOKEN: str
     WH_TOKEN: str

@@ -122,6 +122,26 @@ def upgrade():
         ),
         sa.Column("tokens", sa.Integer(), nullable=False),
         sa.Column("msg_ts", sa.TIMESTAMP(timezone=True), nullable=False),
+        sa.Column("model", sa.String(length=255), nullable=True),
+        sa.Column(
+            "prompt_tokens",
+            sa.Integer(),
+            nullable=False,
+            server_default="0",
+        ),
+        sa.Column(
+            "completion_tokens",
+            sa.Integer(),
+            nullable=False,
+            server_default="0",
+        ),
+        sa.Column(
+            "total_tokens",
+            sa.Integer(),
+            nullable=False,
+            server_default="0",
+        ),
+        sa.Column("trace_id", sa.String(length=255), nullable=True),
         sa.ForeignKeyConstraint(["tenant_id"], ["tenants.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
     )

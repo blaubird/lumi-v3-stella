@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import List
+from typing import List, Optional, Union
 
 
 class FAQBase(BaseModel):
@@ -21,8 +21,20 @@ class FAQResponse(FAQBase):
 class QueryRequest(BaseModel):
     tenant_id: int
     query: str
+    lang: Optional[str] = None
+
+
+class UsedChunk(BaseModel):
+    id: Union[int, str]
+    score: float
+    q: Optional[str] = None
+    a: Optional[str] = None
 
 
 class QueryResponse(BaseModel):
-    answer: str
-    sources: List[FAQResponse] = Field(default_factory=list)
+    text: str
+    prompt_tokens: int
+    completion_tokens: int
+    total_tokens: int
+    model: str
+    used_chunks: List[UsedChunk] = Field(default_factory=list)

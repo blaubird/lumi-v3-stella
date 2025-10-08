@@ -52,3 +52,8 @@ yp1pcw-codex/fix-crash-related-to-pydantic-import
 - Ensured FAQ embedding tasks open their own sessions and always schedule when FAQ creation succeeds.
 - Moved background embedding scheduling outside error paths and added defensive rollbacks/closures.
 
+## Oct 8 2025 · RAG async pipeline
+- Replaced the stubbed `get_rag_response` with an async RAG flow (pgvector retrieval, token-budgeted prompt, OpenAI retries, usage logging).
+- Added pgvector retrieval helpers, token utilities, and fallback messaging covering disabled AI, empty context, and API failures.
+- Extended `Usage` schema/migration for prompt/completion accounting and updated callers; added tiktoken dependency and config knobs for AI settings.
+
