@@ -52,6 +52,3 @@ yp1pcw-codex/fix-crash-related-to-pydantic-import
 - Ensured FAQ embedding tasks open their own sessions and always schedule when FAQ creation succeeds.
 - Moved background embedding scheduling outside error paths and added defensive rollbacks/closures.
 
-## Calendar credential guardrails
-- Lazy-loaded Google Calendar credentials and service to avoid import-time crashes.
-- Added explicit RuntimeError messages when `GOOGLE_SERVICE_JSON`/`DEFAULT_CALENDAR_ID` env vars are absent or invalid.
