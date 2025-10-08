@@ -154,6 +154,8 @@ async def process_ai_reply(tenant_id: str, wa_msg_id: str, user_text: str) -> No
                 tenant_id=tenant.id,
                 direction="outbound",
                 tokens=token_count,
+                total_tokens=token_count,
+                completion_tokens=token_count,
             )
             db.add(usage_record)
             db.commit()

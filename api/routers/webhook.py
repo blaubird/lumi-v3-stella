@@ -170,6 +170,7 @@ async def process_message(
             direction="inbound",
             tokens=0,
             msg_ts=ts,  # Use converted datetime
+            total_tokens=0,
         )
         db.add(usage_record)
         db.commit()
@@ -234,6 +235,8 @@ async def process_message(
                     direction="outbound",
                     tokens=token_count,
                     msg_ts=ts,
+                    total_tokens=token_count,
+                    completion_tokens=token_count,
                 )
                 db.add(outbound_usage)
                 db.commit()
@@ -276,6 +279,8 @@ async def process_message(
                 direction="outbound",
                 tokens=token_count,
                 msg_ts=ts,
+                total_tokens=token_count,
+                completion_tokens=token_count,
             )
             db.add(outbound_usage)
             db.commit()
@@ -306,17 +311,17 @@ async def process_message(
             )
         # Generate response using RAG if no exact match
         try:
+            lang = detect_lang(text)
             response = await get_rag_response(
-                db=db,
                 tenant_id=cast(str, tenant["id"]),
-                user_query=text,
-                system_prompt=cast(str, tenant["system_prompt"]),
+                user_text=text,
+                lang=lang,
+                db=db,
+                redis=redis,
             )
 
-            answer = response["answer"]
-            token_count = response.get(
-                "token_count", 0
-            )  # Get token count from response
+            answer = response["text"]
+            token_count = response.get("total_tokens", 0)
 
             # Save bot message
             bot_message = Message(
@@ -328,13 +333,6 @@ async def process_message(
             db.add(bot_message)
 
             # Track outbound message usage with actual token count
-            outbound_usage = Usage(
-                tenant_id=cast(str, tenant["id"]),
-                direction="outbound",
-                tokens=token_count,
-                msg_ts=ts,  # Use converted datetime
-            )
-            db.add(outbound_usage)
             db.commit()
 
             # Send response via WhatsApp using the send_whatsapp_message function

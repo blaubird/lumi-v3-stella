@@ -1,10 +1,10 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 from sqlalchemy import func
-from typing import cast
+from typing import Any, cast
 from deps import get_db
 from models import Tenant, FAQ
-from schemas.rag import QueryRequest, QueryResponse
+from schemas.rag import QueryRequest, QueryResponse, UsedChunk
 from ai import get_rag_response
 from logging_utils import get_logger
 
@@ -17,7 +17,12 @@ router = APIRouter(prefix="/admin", tags=["RAG"])
 @router.post(
     "/tenants/{tenant_id:str}/queries", response_model=QueryResponse, status_code=201
 )
-async def query_rag(tenant_id: str, query: QueryRequest, db: Session = Depends(get_db)):
+async def query_rag(
+    tenant_id: str,
+    query: QueryRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+):
     """
     Query the RAG system with a question for a specific tenant
     """
@@ -51,11 +56,22 @@ async def query_rag(tenant_id: str, query: QueryRequest, db: Session = Depends(g
             )
 
             # Return the exact match answer
-            return {
-                "answer": faq.answer,
-                "sources": [faq],
-                "token_count": len(faq.answer.split()),  # Simple token count estimation
-            }
+            answer_text = cast(str, faq.answer)
+            return QueryResponse(
+                text=answer_text,
+                prompt_tokens=0,
+                completion_tokens=len(answer_text.split()),
+                total_tokens=len(answer_text.split()),
+                model="faq-direct",
+                used_chunks=[
+                    UsedChunk(
+                        id=cast(int, faq.id),
+                        score=1.0,
+                        q=cast(str, faq.question),
+                        a=answer_text,
+                    )
+                ],
+            )
         else:
             # Log for debugging
             logger.debug(
@@ -64,15 +80,17 @@ async def query_rag(tenant_id: str, query: QueryRequest, db: Session = Depends(g
             )
 
             # Use the RAG implementation to get a response if no exact match
+            redis = cast(Any, request.app.state.redis)
             response = await get_rag_response(
-                db=db,
                 tenant_id=tenant_id,
-                user_query=query.query,
-                system_prompt=cast(str, tenant.system_prompt),
+                user_text=query.query,
+                lang=query.lang or "en",
+                db=db,
+                redis=redis,
             )
 
         logger.info("RAG query processed successfully", extra={"tenant_id": tenant_id})
-        return response
+        return QueryResponse(**response)
     except HTTPException:
         raise
     except Exception as e:

@@ -92,6 +92,11 @@ class Usage(Base):
     )
     tokens = Column(Integer, nullable=False)
     msg_ts = Column(DateTime(timezone=True), nullable=False)
+    model = Column(String(255), nullable=True)
+    prompt_tokens = Column(Integer, nullable=False, default=0, server_default="0")
+    completion_tokens = Column(Integer, nullable=False, default=0, server_default="0")
+    total_tokens = Column(Integer, nullable=False, default=0, server_default="0")
+    trace_id = Column(String(255), nullable=True)
 
     # Relationships
     tenant = relationship("Tenant", back_populates="usage", passive_deletes=True)

@@ -1,254 +1,519 @@
-import os
-import logging
-from typing import Dict, Any, List, Optional
-from openai import AsyncOpenAI
-from sqlalchemy.orm import Session
-from models import FAQ
-from logging_utils import get_logger
+"""AI orchestration for Lumi."""
 
-# Initialize logger
-logger = get_logger(__name__)
-# Add specific logger for AI operations
-logger_ai = logging.getLogger("api.ai")
+from __future__ import annotations
 
-# Initialize OpenAI client globally to ensure a single instance
-# This helps prevent memory leaks and resource exhaustion from creating multiple clients.
-client = None
-try:
-    api_key = os.getenv("OPENAI_API_KEY")
-    if api_key:
-        client = AsyncOpenAI(api_key=api_key)
-    else:
-        logger.warning("OPENAI_API_KEY not found. OpenAI client not initialized.")
-except Exception as e:
-    logger.error(
-        "Failed to initialize OpenAI client", extra={"error": str(e)}, exc_info=e
-    )
+import asyncio
+import math
+import time
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from typing import Any, Dict, Iterable, List, Optional, Sequence, cast
 
-# Model names
-EMBEDDING_MODEL_NAME = "text-embedding-ada-002"
-MODEL_NAME = os.getenv(
-    "OPENAI_MODEL", "ft:gpt-4.1-nano-2025-04-14:luminiteq:flora:Bdezn8Rp"
+import tiktoken
+from openai import (
+    APIConnectionError,
+    APIError,
+    APITimeoutError,
+    AsyncOpenAI,
+    RateLimitError,
 )
+from openai.types.chat import ChatCompletionMessageParam
+from redis.asyncio import Redis
+from sqlalchemy import Select, select
+from sqlalchemy.orm import Session
+
+from cache import get_cached_tenant
+from config import settings
+from logging_utils import get_logger
+from models import FAQ, Usage
+
+logger = get_logger(__name__)
+
+_TOP_K = 6
+_SIMILARITY_THRESHOLD = 0.75
+_CONTEXT_TOKEN_BUDGET = 1200
+_MAX_CHUNK_TOKENS = 400
+_BACKOFF_SCHEDULE = (0.5, 1.5, 3.0)
+_SYSTEM_PROMPT_TEMPLATE = (
+    "You are Lumi, a concise multilingual assistant for SMB customer support. "
+    "Answer strictly based on the provided FAQ context. If the answer is not in "
+    "the context, say you don’t know and propose to connect a human. Use language: {lang}. "
+    "Be brief, accurate, and friendly."
+)
+_GUARDRAILS_PROMPT = (
+    "If the user asks outside business scope or risky content, redirect politely. "
+    "Do not invent facts. Prefer short paragraphs and bullet points."
+)
+_RAG_PREFIX_TEMPLATE = (
+    "FAQ context (summaries):\n{summaries}\n"
+    'User question: "{question}"\n'
+    "— Answer in {lang}. If insufficient context, say you don’t know."
+)
+_FALLBACK_LANG_MAP: Dict[str, str] = {
+    "fr": "Je ne peux pas répondre pour le moment. Un membre de l’équipe vous contactera bientôt.",
+    "en": "I’m unable to answer right now. A teammate will get back to you shortly.",
+}
+
+_client: AsyncOpenAI | None = None
+_client_lock = asyncio.Lock()
 
 
-def track_openai_call(model: str, endpoint: str):
-    """
-    Decorator to track OpenAI API calls
-    """
+@dataclass(slots=True)
+class FAQChunk:
+    faq_id: int
+    question: str
+    answer: str
+    score: float
 
-    def decorator(func):
-        async def wrapper(*args, **kwargs):
-            start_time = __import__("time").time()
-
-            try:
-                # Call the original function
-                result = await func(*args, **kwargs)
-
-                # Calculate duration
-                duration = __import__("time").time() - start_time
-
-                # Log the API call
-                logger.info(
-                    "OpenAI API call completed",
-                    extra={
-                        "model": model,
-                        "endpoint": endpoint,
-                        "duration_seconds": round(duration, 2),
-                    },
-                )
-
-                return result
-            except Exception as e:
-                # Log error
-                logger.error(
-                    "OpenAI API call failed",
-                    extra={"model": model, "endpoint": endpoint, "error": str(e)},
-                    exc_info=e,
-                )
-                raise
-
-        return wrapper
-
-    return decorator
-
-
-async def generate_embedding(text_content: str) -> Optional[List[float]]:
-    """
-    Generate an embedding for the given text content using OpenAI's API
-    """
-    if client is None:
-        logger.error("OpenAI client is not initialized. Cannot generate embedding.")
-        return None
-
-    try:
-        logger.info(
-            "Generating embedding for text",
-            extra={
-                "text_preview": (
-                    text_content[:50] + "..."
-                    if len(text_content) > 50
-                    else text_content
-                ),
-                "text_length": len(text_content),
-            },
-        )
-
-        response = await client.embeddings.create(
-            model=EMBEDDING_MODEL_NAME, input=text_content
-        )
-        embedding = response.data[0].embedding
-
-        # Log successful result
-        logger.info(
-            "Successfully generated embedding",
-            extra={"embedding_dimensions": len(embedding)},
-        )
-        return embedding
-    except Exception as e:
-        # Structured logging of errors
-        logger.error(
-            "Error during embedding generation",
-            extra={"error_type": type(e).__name__, "error_details": str(e)},
-            exc_info=e,
-        )
-
-        return None
-
-
-async def find_relevant_faqs(
-    db: Session, tenant_id: str, user_query: str, top_k: int = 3
-) -> List[FAQ]:
-    """
-    Finds the top_k most relevant FAQs from the database for a specific tenant
-    based on the user query, using cosine similarity with pgvector.
-
-    Optimization: Ensure a proper index is created on the 'embedding' column
-    in the FAQ table for efficient similarity search.
-    Example: CREATE INDEX ON faqs USING ivfflat (embedding vector_l2_ops) WITH (lists = 100);
-    (This is a database-level optimization, not directly in Python code)
-    """
-    if client is None:
-        logger.error("OpenAI client is not initialized. Cannot find relevant FAQs.")
-        raise RuntimeError("OpenAI client is not initialized.")
-    if not user_query:
-        logger.warning("Empty user query provided.")
-        return []
-    query_embedding = await generate_embedding(user_query)
-    if query_embedding is None:
-        logger.warning(
-            "Could not generate embedding for query", extra={"query": user_query}
-        )
-        return []
-    try:
-        # Using SQLAlchemy's ORM with pgvector's cosine_distance
-        # Lower cosine_distance means higher similarity
-        relevant_faqs = (
-            db.query(FAQ)
-            .filter(FAQ.tenant_id == tenant_id)
-            .filter(FAQ.embedding.isnot(None))  # Ensure embedding is not null
-            .order_by(FAQ.embedding.cosine_distance(query_embedding))
-            .limit(top_k)
-            .all()
-        )
-        logger.info(
-            "Found relevant FAQs",
-            extra={
-                "count": len(relevant_faqs),
-                "tenant_id": tenant_id,
-                "query": user_query,
-                "top_k": top_k,
-            },
-        )
-        return relevant_faqs
-    except Exception as e:
-        logger.error(
-            "Error finding relevant FAQs",
-            extra={"tenant_id": tenant_id, "query": user_query},
-            exc_info=e,
-        )
-        return []
-
-
-@track_openai_call(model=MODEL_NAME, endpoint="chat/completions")
-async def get_rag_response(
-    db: Session, tenant_id: str, user_query: str, system_prompt: str
-) -> Dict[str, Any]:
-    """
-    Core RAG function:
-    1. Finds relevant FAQs for the user_query and tenant_id.
-    2. Constructs a prompt with this context.
-    3. Sends the prompt to an LLM to generate a response.
-
-    Returns:
-        Dictionary with answer, sources, and token_count
-    """
-    logger.info(
-        "RAG: Processing query", extra={"tenant_id": tenant_id, "query": user_query}
-    )
-
-    relevant_faqs = await find_relevant_faqs(db, tenant_id, user_query, top_k=3)
-
-    context_parts = []
-    sources = []
-    if not relevant_faqs:
-        context_str = (
-            "No specific information found in the knowledge base for your query."
-        )
-    else:
-        for i, faq_item in enumerate(relevant_faqs):
-            context_parts.append(
-                f"{i+1}. Question: {faq_item.question}\n   Answer: {faq_item.answer}"
-            )
-            sources.append(
-                {
-                    "id": faq_item.id,
-                    "question": faq_item.question,
-                    "answer": faq_item.answer,
-                }
-            )
-        context_str = "Relevant information from knowledge base:\n" + "\n\n".join(
-            context_parts
-        )
-
-    # Construct the prompt for the LLM
-    prompt = f"{system_prompt}\n\nContext from knowledge base:\n{context_str}\n\nUser Question: {user_query}\n\nAnswer:"
-
-    logger_ai.info(f"Calling model {MODEL_NAME}")
-
-    logger.debug(
-        "Constructed prompt for LLM",
-        extra={"prompt_length": len(prompt), "faq_count": len(relevant_faqs)},
-    )
-
-    # For now, we'll return a placeholder response that includes the context found
-    try:
-        # In a real implementation, this would be an actual OpenAI API call
-        # response = await openai.ChatCompletion.acreate(...)
-
-        if not relevant_faqs:
-            llm_answer = f"I couldn't find specific information in our knowledge base for your question: '{user_query}'. Please try rephrasing or ask something else."
-        else:
-            llm_answer = f"Based on the information I found regarding '{user_query}':\n\n{context_str}\n\n(This is a conceptual answer. An actual LLM would synthesize this information to directly answer your question.)"
-    except Exception as e:
-        logger_ai.error(f"OpenAI error: {e}")
+    def to_used_chunk(self) -> Dict[str, Any]:
         return {
-            "answer": "Извините, временная ошибка. Попробуйте позже.",
-            "sources": [],
-            "token_count": 0,
+            "id": self.faq_id,
+            "score": round(self.score, 4),
+            "q": _safe_snippet(self.question),
+            "a": _safe_snippet(self.answer),
         }
 
-    # Calculate token count (simplified estimation)
-    # In a real implementation, this would come from the OpenAI API response
-    token_count = len(prompt.split()) + len(llm_answer.split())
 
-    logger.info(
-        "RAG: Generated response",
-        extra={
-            "tenant_id": tenant_id,
-            "response_length": len(llm_answer),
-            "token_count": token_count,
-        },
+def _is_ai_enabled() -> bool:
+    raw = getattr(settings, "AI_ENABLE", None)
+    if raw is None:
+        return True
+    if isinstance(raw, bool):
+        return raw
+    return str(raw).lower() in {"1", "true", "yes", "on"}
+
+
+async def _get_client() -> AsyncOpenAI:
+    global _client
+    if _client is not None:
+        return _client
+    async with _client_lock:
+        if _client is not None:
+            return _client
+        if not settings.OPENAI_API_KEY:
+            raise RuntimeError("OPENAI_API_KEY is missing")
+        _client = AsyncOpenAI(
+            api_key=settings.OPENAI_API_KEY,
+            base_url=getattr(settings, "OPENAI_BASE_URL", None),
+        )
+        return _client
+
+
+def _resolve_language(lang: str) -> str:
+    if not lang:
+        return "en"
+    return lang.lower()
+
+
+def _fallback_text(lang: str) -> str:
+    lang_key = _resolve_language(lang)[:2]
+    return _FALLBACK_LANG_MAP.get(
+        lang_key,
+        _FALLBACK_LANG_MAP["en"],
     )
 
-    return {"answer": llm_answer, "sources": sources, "token_count": token_count}
+
+def _insufficient_context_text(lang: str) -> str:
+    resolved = _resolve_language(lang)[:2]
+    if resolved == "fr":
+        return (
+            "Je ne dispose pas d’informations suffisantes dans la base FAQ. "
+            "Souhaitez-vous qu’un membre de l’équipe prenne le relais ?"
+        )
+    return (
+        "I don’t have enough information in the FAQ to answer. "
+        "Shall I connect you with a human teammate?"
+    )
+
+
+def _safe_snippet(text: str, max_length: int = 280) -> str:
+    text = text.strip()
+    if len(text) <= max_length:
+        return text
+    return f"{text[: max_length - 1]}…"
+
+
+def _score_from_distance(distance: float | None) -> float:
+    if distance is None or not math.isfinite(distance):
+        return 0.0
+    return max(0.0, min(1.0, 1.0 - distance))
+
+
+async def generate_embedding(text: str) -> List[float]:
+    client = await _get_client()
+    start = time.perf_counter()
+    response = await client.embeddings.create(
+        input=text,
+        model=settings.OPENAI_EMBEDDING_MODEL,
+        timeout=getattr(settings, "AI_REQUEST_TIMEOUT_SECONDS", 30.0),
+    )
+    duration = time.perf_counter() - start
+    logger.info(
+        "Generated embedding",
+        extra={"duration_ms": int(duration * 1000), "tokens": len(text.split())},
+    )
+    return response.data[0].embedding
+
+
+async def backfill_missing_faq_embeddings(
+    db: Session, tenant_id: str | None = None
+) -> int:
+    stmt = select(FAQ).where(FAQ.embedding.is_(None))
+    if tenant_id:
+        stmt = stmt.where(FAQ.tenant_id == tenant_id)
+    rows: List[FAQ] = list(db.execute(stmt).scalars())
+    if not rows:
+        return 0
+    client = await _get_client()
+    updated = 0
+    for faq in rows:
+        try:
+            response = await client.embeddings.create(
+                input=f"{faq.question}\n\n{faq.answer}",
+                model=settings.OPENAI_EMBEDDING_MODEL,
+                timeout=getattr(settings, "AI_REQUEST_TIMEOUT_SECONDS", 30.0),
+            )
+        except Exception as exc:  # pragma: no cover - backfill utility
+            logger.error(
+                "Embedding backfill failed",
+                extra={"faq_id": faq.id, "tenant_id": faq.tenant_id, "error": str(exc)},
+            )
+            continue
+        setattr(faq, "embedding", response.data[0].embedding)
+        db.add(faq)
+        updated += 1
+    db.commit()
+    return updated
+
+
+def _similar_faqs_stmt(embedding: Sequence[float], tenant_id: str) -> Select[Any]:
+    return (
+        select(
+            FAQ.id,
+            FAQ.question,
+            FAQ.answer,
+            FAQ.embedding.cosine_distance(list(embedding)).label("distance"),
+        )
+        .where(FAQ.tenant_id == tenant_id)
+        .where(FAQ.embedding.isnot(None))
+        .order_by(FAQ.embedding.cosine_distance(list(embedding)))
+        .limit(_TOP_K)
+    )
+
+
+def _token_encoding(model: str) -> tiktoken.Encoding:
+    try:
+        return tiktoken.encoding_for_model(model)
+    except KeyError:
+        try:
+            return tiktoken.get_encoding("cl100k_base")
+        except Exception as exc:  # pragma: no cover - defensive guard
+            raise RuntimeError(
+                "tiktoken encoding not available; please upgrade tiktoken"
+            ) from exc
+
+
+def _truncate_to_token_limit(text: str, limit: int, encoding: tiktoken.Encoding) -> str:
+    tokens = encoding.encode(text)
+    if len(tokens) <= limit:
+        return text
+    truncated = encoding.decode(tokens[:limit])
+    return _safe_snippet(truncated, len(truncated))
+
+
+def _pack_context(
+    chunks: Iterable[FAQChunk],
+    encoding: tiktoken.Encoding,
+    token_budget: int,
+) -> tuple[str, List[FAQChunk]]:
+    included: List[FAQChunk] = []
+    lines: List[str] = []
+    used_tokens = 0
+    for index, chunk in enumerate(chunks, start=1):
+        summary = _format_chunk_summary(index, chunk, encoding)
+        token_count = len(encoding.encode(summary))
+        if used_tokens + token_count > token_budget:
+            if not included and token_budget > 0:
+                summary = _trim_summary_to_budget(summary, token_budget, encoding)
+                token_count = len(encoding.encode(summary))
+                if token_count <= token_budget:
+                    included.append(chunk)
+                    lines.append(summary)
+                    used_tokens += token_count
+            break
+        included.append(chunk)
+        lines.append(summary)
+        used_tokens += token_count
+    if not lines:
+        return "(no relevant context)", []
+    return "\n".join(lines), included
+
+
+def _format_chunk_summary(
+    index: int, chunk: FAQChunk, encoding: tiktoken.Encoding
+) -> str:
+    question = _truncate_to_token_limit(
+        chunk.question, _MAX_CHUNK_TOKENS // 2, encoding
+    )
+    answer = _truncate_to_token_limit(chunk.answer, _MAX_CHUNK_TOKENS, encoding)
+    return f"{index}. Q: {question}\n   A: {answer}"
+
+
+def _trim_summary_to_budget(
+    summary: str, budget: int, encoding: tiktoken.Encoding
+) -> str:
+    tokens = encoding.encode(summary)
+    if len(tokens) <= budget:
+        return summary
+    trimmed = encoding.decode(tokens[:budget])
+    return _safe_snippet(trimmed, len(trimmed))
+
+
+def _message_text(message: ChatCompletionMessageParam) -> str:
+    content = message.get("content")
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        fragments: List[str] = []
+        for part in content:
+            if isinstance(part, dict):
+                text_fragment = part.get("text")
+                if isinstance(text_fragment, str):
+                    fragments.append(text_fragment)
+        return " ".join(fragments)
+    return ""
+
+
+async def _retrieve_similar_chunks(
+    db: Session, tenant_id: str, query_embedding: Sequence[float]
+) -> List[FAQChunk]:
+    stmt = _similar_faqs_stmt(query_embedding, tenant_id)
+    rows = db.execute(stmt).all()
+    chunks: List[FAQChunk] = []
+    for row in rows:
+        distance = row.distance if hasattr(row, "distance") else row[3]
+        score = _score_from_distance(distance)
+        if score < _SIMILARITY_THRESHOLD:
+            continue
+        faq_id = row.id if hasattr(row, "id") else row[0]
+        question = row.question if hasattr(row, "question") else row[1]
+        answer = row.answer if hasattr(row, "answer") else row[2]
+        chunks.append(
+            FAQChunk(faq_id=faq_id, question=question, answer=answer, score=score)
+        )
+    return chunks
+
+
+async def _call_openai(
+    messages: Sequence[ChatCompletionMessageParam],
+) -> tuple[str, int, int, str]:
+    client = await _get_client()
+    for attempt, delay in enumerate(_BACKOFF_SCHEDULE, start=1):
+        try:
+            response = await client.chat.completions.create(
+                model=settings.OPENAI_MODEL,
+                messages=list(messages),
+                temperature=getattr(settings, "AI_TEMPERATURE", 0.2),
+                max_tokens=settings.AI_MAX_TOKENS_COMPLETION,
+                timeout=getattr(settings, "AI_REQUEST_TIMEOUT_SECONDS", 30.0),
+            )
+        except (RateLimitError, APITimeoutError, APIConnectionError) as exc:
+            logger.warning(
+                "Transient OpenAI error",
+                extra={"attempt": attempt, "error": str(exc)},
+            )
+            if attempt == len(_BACKOFF_SCHEDULE):
+                raise
+            await asyncio.sleep(delay)
+            continue
+        except APIError as exc:
+            status = getattr(exc, "status_code", None)
+            if status and 500 <= status < 600:
+                logger.warning(
+                    "OpenAI server error",
+                    extra={"attempt": attempt, "status": status},
+                )
+                if attempt == len(_BACKOFF_SCHEDULE):
+                    raise
+                await asyncio.sleep(delay)
+                continue
+            raise
+        else:
+            choice = response.choices[0]
+            text = choice.message.content or ""
+            usage = response.usage
+            prompt_tokens = usage.prompt_tokens if usage else 0
+            completion_tokens = usage.completion_tokens if usage else len(text.split())
+            model = response.model
+            return text.strip(), prompt_tokens, completion_tokens, model
+    raise RuntimeError("OpenAI retries exhausted")
+
+
+def _persist_usage(
+    db: Session,
+    tenant_id: str,
+    model: str,
+    prompt_tokens: int,
+    completion_tokens: int,
+    total_tokens: int,
+    trace_id: str | None,
+) -> None:
+    record = Usage(
+        tenant_id=tenant_id,
+        direction="outbound",
+        tokens=total_tokens,
+        msg_ts=datetime.now(timezone.utc),
+        model=model,
+        prompt_tokens=prompt_tokens,
+        completion_tokens=completion_tokens,
+        total_tokens=total_tokens,
+        trace_id=trace_id,
+    )
+    db.add(record)
+    db.commit()
+
+
+def _build_messages(
+    lang: str,
+    context: str,
+    question: str,
+    tenant_prompt: Optional[str] = None,
+) -> List[ChatCompletionMessageParam]:
+    resolved_lang = _resolve_language(lang)
+    system_prompt = _SYSTEM_PROMPT_TEMPLATE.format(lang=resolved_lang)
+    rag_prompt = _RAG_PREFIX_TEMPLATE.format(
+        summaries=context,
+        question=question,
+        lang=resolved_lang,
+    )
+    messages: List[ChatCompletionMessageParam] = [
+        {"role": "system", "content": system_prompt},
+        {"role": "system", "content": _GUARDRAILS_PROMPT},
+    ]
+    if tenant_prompt:
+        messages.append({"role": "system", "content": tenant_prompt})
+    messages.append({"role": "user", "content": rag_prompt})
+    return messages
+
+
+def _build_used_chunks(chunks: Sequence[FAQChunk]) -> List[Dict[str, Any]]:
+    return [chunk.to_used_chunk() for chunk in chunks]
+
+
+async def get_rag_response(
+    tenant_id: str,
+    user_text: str,
+    lang: str,
+    db: Session,
+    redis: Redis,
+    trace_id: str | None = None,
+) -> Dict[str, Any]:
+    if not _is_ai_enabled():
+        text = _fallback_text(lang)
+        return {
+            "text": text,
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+            "model": settings.OPENAI_MODEL,
+            "used_chunks": [],
+        }
+
+    if not user_text:
+        return {
+            "text": _insufficient_context_text(lang),
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+            "model": settings.OPENAI_MODEL,
+            "used_chunks": [],
+        }
+
+    tenant = await get_cached_tenant(redis, db, tenant_id)
+    if tenant is None:
+        raise ValueError(f"Unknown tenant {tenant_id}")
+
+    encoding = _token_encoding(settings.OPENAI_MODEL)
+
+    try:
+        query_embedding = await generate_embedding(user_text)
+    except Exception as exc:
+        logger.error(
+            "Failed to generate query embedding",
+            extra={"tenant_id": tenant_id, "error": str(exc)},
+        )
+        text = _fallback_text(lang)
+        return {
+            "text": text,
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+            "model": settings.OPENAI_MODEL,
+            "used_chunks": [],
+        }
+
+    chunks = await _retrieve_similar_chunks(db, tenant_id, query_embedding)
+    context_text, used_chunks = _pack_context(chunks, encoding, _CONTEXT_TOKEN_BUDGET)
+    tenant_prompt = None
+    if isinstance(tenant, dict):
+        tenant_prompt = cast(Optional[str], tenant.get("system_prompt"))
+    messages = _build_messages(lang, context_text, user_text, tenant_prompt)
+
+    if not used_chunks:
+        text = _insufficient_context_text(lang)
+        prompt_tokens_estimate = sum(
+            len(encoding.encode(_message_text(message))) for message in messages
+        )
+        return {
+            "text": text,
+            "prompt_tokens": prompt_tokens_estimate,
+            "completion_tokens": 0,
+            "total_tokens": prompt_tokens_estimate,
+            "model": settings.OPENAI_MODEL,
+            "used_chunks": [],
+        }
+
+    try:
+        completion_text, prompt_tokens, completion_tokens, model = await _call_openai(
+            messages
+        )
+    except Exception as exc:
+        logger.error(
+            "OpenAI completion failed",
+            extra={"tenant_id": tenant_id, "error": str(exc)},
+        )
+        text = _fallback_text(lang)
+        return {
+            "text": text,
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+            "model": settings.OPENAI_MODEL,
+            "used_chunks": _build_used_chunks(used_chunks),
+        }
+
+    total_tokens = prompt_tokens + completion_tokens
+    try:
+        _persist_usage(
+            db=db,
+            tenant_id=tenant_id,
+            model=model,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            total_tokens=total_tokens,
+            trace_id=trace_id,
+        )
+    except Exception as exc:
+        logger.error(
+            "Failed to persist usage",
+            extra={"tenant_id": tenant_id, "error": str(exc)},
+        )
+
+    return {
+        "text": completion_text,
+        "prompt_tokens": prompt_tokens,
+        "completion_tokens": completion_tokens,
+        "total_tokens": total_tokens,
+        "model": model,
+        "used_chunks": _build_used_chunks(used_chunks),
+    }
