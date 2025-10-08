@@ -46,3 +46,8 @@ yp1pcw-codex/fix-crash-related-to-pydantic-import
 
 ## Redis version bump
 - Updated Redis dependency to 6.4.0 to track latest upstream fixes.
+
+## Background task hardening
+- Added missing FastAPI/SQLAlchemy imports in `deps.py` to restore admin auth guards.
+- Ensured FAQ embedding tasks open their own sessions and always schedule when FAQ creation succeeds.
+- Moved background embedding scheduling outside error paths and added defensive rollbacks/closures.

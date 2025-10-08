@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func
 from typing import List, Any, cast
 from deps import get_db
+from database import SessionLocal
 from models import Tenant, Message, FAQ, Usage
 from schemas.admin import (
     TenantCreate,
@@ -352,11 +353,10 @@ async def create_faq(
             raise HTTPException(
                 status_code=400, detail=f"Error creating FAQ: {str(db_error)}"
             )
-
-            # Generate embedding in background
+        else:
+            # Generate embedding in background using a fresh session per task
             background_tasks.add_task(
                 generate_embedding_for_faq,
-                db=db,
                 faq_id=cast(int, db_faq.id),
                 tenant_id=tenant_id,
                 question=faq.question,
@@ -507,7 +507,6 @@ async def bulk_import_faq(
                 # Schedule embedding generation in background
                 background_tasks.add_task(
                     generate_embedding_for_faq,
-                    db=db,
                     faq_id=cast(int, db_faq.id),
                     tenant_id=tenant_id,
                     question=item.question,
@@ -559,9 +558,10 @@ async def bulk_import_faq(
 
 
 async def generate_embedding_for_faq(
-    db: Session, faq_id: int, tenant_id: str, question: str, answer: str
-):
+    faq_id: int, tenant_id: str, question: str, answer: str
+) -> None:
     """Background task to generate embedding for FAQ"""
+    db = SessionLocal()
     try:
         # Get the FAQ from the database
         faq = db.query(FAQ).filter(FAQ.id == faq_id, FAQ.tenant_id == tenant_id).first()
@@ -578,7 +578,6 @@ async def generate_embedding_for_faq(
         embedding = await generate_embedding(f"{question}\n{answer}")
 
         # Update FAQ with embedding
-        faq = cast(FAQ, faq)
         setattr(faq, "embedding", embedding)
         db.commit()
 
@@ -587,8 +586,11 @@ async def generate_embedding_for_faq(
             extra={"faq_id": faq_id, "tenant_id": tenant_id},
         )
     except Exception as e:
+        db.rollback()
         logger.error(
             "Error generating embedding for FAQ",
             extra={"faq_id": faq_id, "tenant_id": tenant_id, "error": str(e)},
             exc_info=e,
         )
+    finally:
+        db.close()

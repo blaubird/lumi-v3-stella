@@ -1,4 +1,5 @@
-import json, os
+import json
+import os
 from datetime import datetime
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
@@ -10,15 +11,18 @@ _creds = service_account.Credentials.from_service_account_info(
 _svc = build("calendar", "v3", credentials=_creds, cache_discovery=False)
 _DEFAULT_CAL = os.getenv("DEFAULT_CALENDAR_ID")
 
-def create_event(summary: str,
-                 starts_at: datetime,
-                 ends_at: datetime,
-                 calendar_id: str | None = None,
-                 guests: list[str] | None = None) -> str:
+
+def create_event(
+    summary: str,
+    starts_at: datetime,
+    ends_at: datetime,
+    calendar_id: str | None = None,
+    guests: list[str] | None = None,
+) -> str:
     body = {
         "summary": summary,
         "start": {"dateTime": starts_at.isoformat()},
-        "end":   {"dateTime": ends_at.isoformat()},
+        "end": {"dateTime": ends_at.isoformat()},
     }
     if guests:
         body["attendees"] = [{"email": g} for g in guests]
