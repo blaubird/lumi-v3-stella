@@ -26,6 +26,11 @@ logger = get_logger(__name__)
 router = APIRouter(prefix="/admin", tags=["Admin"])
 
 
+def _tenant_key(tenant_id: int) -> str:
+    """Normalize tenant identifiers for database lookups."""
+    return str(tenant_id)
+
+
 @router.get(
     "/tenants",
     response_model=List[TenantResponse],
@@ -89,8 +94,8 @@ async def create_tenant(tenant: TenantCreate, db: Session = Depends(get_db)):
             )
             raise HTTPException(status_code=400, detail="Phone ID already exists")
 
-        # Use the ID from the request instead of generating a new UUID
-        tenant_id = tenant.id
+        # Use the numeric ID from the request and store it as string internally
+        tenant_id = _tenant_key(tenant.id)
 
         # Create new tenant
         db_tenant = Tenant(
@@ -116,14 +121,15 @@ async def create_tenant(tenant: TenantCreate, db: Session = Depends(get_db)):
 
 
 @router.get(
-    "/tenants/{tenant_id:str}",
+    "/tenants/{tenant_id}",
     response_model=TenantResponse,
     dependencies=[Depends(verify_admin_token)],
 )
-async def get_tenant(tenant_id: str, db: Session = Depends(get_db)):
+async def get_tenant(tenant_id: int, db: Session = Depends(get_db)):
     """Get a specific tenant by ID"""
     try:
-        tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
+        tenant_key = _tenant_key(tenant_id)
+        tenant = db.query(Tenant).filter(Tenant.id == tenant_key).first()
         if not tenant:
             logger.warning("Tenant not found", extra={"tenant_id": tenant_id})
             raise HTTPException(status_code=404, detail="Tenant not found")
@@ -145,16 +151,17 @@ async def get_tenant(tenant_id: str, db: Session = Depends(get_db)):
 
 
 @router.put(
-    "/tenants/{tenant_id:str}",
+    "/tenants/{tenant_id}",
     response_model=TenantResponse,
     dependencies=[Depends(verify_admin_token)],
 )
 async def update_tenant(
-    tenant_id: str, tenant: TenantUpdate, db: Session = Depends(get_db)
+    tenant_id: int, tenant: TenantUpdate, db: Session = Depends(get_db)
 ):
     """Update a tenant"""
     try:
-        db_tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
+        tenant_key = _tenant_key(tenant_id)
+        db_tenant = db.query(Tenant).filter(Tenant.id == tenant_key).first()
         if not db_tenant:
             logger.warning(
                 "Tenant not found for update", extra={"tenant_id": tenant_id}
@@ -205,11 +212,12 @@ async def update_tenant(
         )
 
 
-@router.delete("/tenants/{tenant_id:str}", dependencies=[Depends(verify_admin_token)])
-async def delete_tenant(tenant_id: str, db: Session = Depends(get_db)):
+@router.delete("/tenants/{tenant_id}", dependencies=[Depends(verify_admin_token)])
+async def delete_tenant(tenant_id: int, db: Session = Depends(get_db)):
     """Delete a tenant"""
     try:
-        tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
+        tenant_key = _tenant_key(tenant_id)
+        tenant = db.query(Tenant).filter(Tenant.id == tenant_key).first()
         if not tenant:
             logger.warning(
                 "Tenant not found for deletion", extra={"tenant_id": tenant_id}
@@ -237,16 +245,17 @@ async def delete_tenant(tenant_id: str, db: Session = Depends(get_db)):
 
 
 @router.get(
-    "/tenants/{tenant_id:str}/messages",
+    "/tenants/{tenant_id}/messages",
     response_model=List[MessageResponse],
     dependencies=[Depends(verify_admin_token)],
 )
 async def get_tenant_messages(
-    tenant_id: str, limit: int = 50, offset: int = 0, db: Session = Depends(get_db)
+    tenant_id: int, limit: int = 50, offset: int = 0, db: Session = Depends(get_db)
 ):
     """Get messages for a specific tenant"""
     try:
-        tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
+        tenant_key = _tenant_key(tenant_id)
+        tenant = db.query(Tenant).filter(Tenant.id == tenant_key).first()
         if not tenant:
             logger.warning(
                 "Tenant not found for message retrieval", extra={"tenant_id": tenant_id}
@@ -255,7 +264,7 @@ async def get_tenant_messages(
 
         messages = (
             db.query(Message)
-            .filter(Message.tenant_id == tenant_id)
+            .filter(Message.tenant_id == tenant_key)
             .order_by(Message.ts.desc())
             .offset(offset)
             .limit(limit)
@@ -282,21 +291,22 @@ async def get_tenant_messages(
 
 
 @router.get(
-    "/tenants/{tenant_id:str}/faqs",
+    "/tenants/{tenant_id}/faqs",
     response_model=List[FAQResponse],
     dependencies=[Depends(verify_admin_token)],
 )
-async def get_tenant_faqs(tenant_id: str, db: Session = Depends(get_db)):
+async def get_tenant_faqs(tenant_id: int, db: Session = Depends(get_db)):
     """Get FAQs for a specific tenant"""
     try:
-        tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
+        tenant_key = _tenant_key(tenant_id)
+        tenant = db.query(Tenant).filter(Tenant.id == tenant_key).first()
         if not tenant:
             logger.warning(
                 "Tenant not found for FAQ retrieval", extra={"tenant_id": tenant_id}
             )
             raise HTTPException(status_code=404, detail="Tenant not found")
 
-        faqs = db.query(FAQ).filter(FAQ.tenant_id == tenant_id).all()
+        faqs = db.query(FAQ).filter(FAQ.tenant_id == tenant_key).all()
 
         logger.info(
             "Retrieved FAQs for tenant",
@@ -318,20 +328,21 @@ async def get_tenant_faqs(tenant_id: str, db: Session = Depends(get_db)):
 
 
 @router.post(
-    "/tenants/{tenant_id:str}/faqs",
+    "/tenants/{tenant_id}/faqs",
     response_model=FAQResponse,
     status_code=201,
     dependencies=[Depends(verify_admin_token)],
 )
 async def create_faq(
-    tenant_id: str,
+    tenant_id: int,
     faq: FAQCreate,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
 ):
     """Create a new FAQ for a tenant"""
     try:
-        tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
+        tenant_key = _tenant_key(tenant_id)
+        tenant = db.query(Tenant).filter(Tenant.id == tenant_key).first()
         if not tenant:
             logger.warning(
                 "Tenant not found for FAQ creation", extra={"tenant_id": tenant_id}
@@ -340,7 +351,7 @@ async def create_faq(
 
         try:
             # Create new FAQ without embedding initially
-            db_faq = FAQ(tenant_id=tenant_id, question=faq.question, answer=faq.answer)
+            db_faq = FAQ(tenant_id=tenant_key, question=faq.question, answer=faq.answer)
             db.add(db_faq)
             db.commit()
             db.refresh(db_faq)
@@ -358,7 +369,7 @@ async def create_faq(
             background_tasks.add_task(
                 generate_embedding_for_faq,
                 faq_id=cast(int, db_faq.id),
-                tenant_id=tenant_id,
+                tenant_id=tenant_key,
                 question=faq.question,
                 answer=faq.answer,
             )
@@ -389,19 +400,20 @@ async def create_faq(
 
 
 @router.get(
-    "/tenants/{tenant_id:str}/usage",
+    "/tenants/{tenant_id}/usage",
     response_model=UsageStatsResponse,
     dependencies=[Depends(verify_admin_token)],
 )
 async def get_tenant_usage(
-    tenant_id: str,
+    tenant_id: int,
     limit: int = Query(50, ge=1, le=100),
     offset: int = Query(0, ge=0),
     db: Session = Depends(get_db),
 ):
     """Get usage statistics for a specific tenant"""
     try:
-        tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
+        tenant_key = _tenant_key(tenant_id)
+        tenant = db.query(Tenant).filter(Tenant.id == tenant_key).first()
         if not tenant:
             logger.warning(
                 "Tenant not found for usage retrieval", extra={"tenant_id": tenant_id}
@@ -411,8 +423,8 @@ async def get_tenant_usage(
         # Get paginated usage items
         usage_items = (
             db.query(Usage)
-            .filter(Usage.tenant_id == tenant_id)
-            .order_by(Usage.msg_ts.desc())
+            .filter(Usage.tenant_id == tenant_key)
+            .order_by(Usage.msg_ts.desc(), Usage.id.desc())
             .offset(offset)
             .limit(limit)
             .all()
@@ -421,7 +433,7 @@ async def get_tenant_usage(
         # Get total inbound tokens
         total_inbound = (
             db.query(func.sum(Usage.tokens))
-            .filter(Usage.tenant_id == tenant_id, Usage.direction == "inbound")
+            .filter(Usage.tenant_id == tenant_key, Usage.direction == "inbound")
             .scalar()
             or 0
         )
@@ -429,7 +441,7 @@ async def get_tenant_usage(
         # Get total outbound tokens
         total_outbound = (
             db.query(func.sum(Usage.tokens))
-            .filter(Usage.tenant_id == tenant_id, Usage.direction == "outbound")
+            .filter(Usage.tenant_id == tenant_key, Usage.direction == "outbound")
             .scalar()
             or 0
         )
@@ -464,13 +476,13 @@ async def get_tenant_usage(
 
 
 @router.post(
-    "/tenants/{tenant_id:str}/faqs/bulk",
+    "/tenants/{tenant_id}/faqs/bulk",
     response_model=BulkFAQImportResponse,
     status_code=201,
     dependencies=[Depends(verify_admin_token)],
 )
 async def bulk_import_faq(
-    tenant_id: str,
+    tenant_id: int,
     import_data: BulkFAQImportRequest,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
@@ -480,7 +492,8 @@ async def bulk_import_faq(
     """
     try:
         # Verify tenant exists
-        tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
+        tenant_key = _tenant_key(tenant_id)
+        tenant = db.query(Tenant).filter(Tenant.id == tenant_key).first()
         if not tenant:
             logger.warning(
                 "Tenant not found for bulk FAQ import", extra={"tenant_id": tenant_id}
@@ -498,7 +511,7 @@ async def bulk_import_faq(
             try:
                 # Create FAQ without embedding initially
                 db_faq = FAQ(
-                    tenant_id=tenant_id, question=item.question, answer=item.answer
+                    tenant_id=tenant_key, question=item.question, answer=item.answer
                 )
                 db.add(db_faq)
                 db.commit()
@@ -508,7 +521,7 @@ async def bulk_import_faq(
                 background_tasks.add_task(
                     generate_embedding_for_faq,
                     faq_id=cast(int, db_faq.id),
-                    tenant_id=tenant_id,
+                    tenant_id=tenant_key,
                     question=item.question,
                     answer=item.answer,
                 )
