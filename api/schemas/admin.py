@@ -7,19 +7,14 @@ from typing import Any, List, Optional
 from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator
 
 
-def _coerce_int(value: Any, field_name: str) -> int:
+def _coerce_int(value: Any, field_name: Optional[str]) -> int:
+    label = field_name or "value"
     if isinstance(value, bool):
-        raise ValueError(f"{field_name} must be an integer")
+        raise ValueError(f"{label} must be an integer")
     try:
         return int(value)
     except (TypeError, ValueError) as exc:
-        raise ValueError(f"{field_name} must be an integer") from exc
-
-
-def _coerce_optional_int(value: Any, field_name: str) -> Optional[int]:
-    if value is None:
-        return None
-    return _coerce_int(value, field_name)
+        raise ValueError(f"{label} must be an integer") from exc
 
 
 class TenantBase(BaseModel):
@@ -97,9 +92,10 @@ class UsageResponse(BaseModel):
     tokens: int
     msg_ts: datetime
     model: Optional[str] = None
-    prompt_tokens: Optional[int] = Field(default=None, ge=0)
-    completion_tokens: Optional[int] = Field(default=None, ge=0)
-    total_tokens: Optional[int] = Field(default=None, ge=0)
+    prompt_tokens: int = Field(default=0, ge=0)
+    completion_tokens: int = Field(default=0, ge=0)
+    total_tokens: int = Field(default=0, ge=0)
+    trace_id: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -112,8 +108,10 @@ class UsageResponse(BaseModel):
         "prompt_tokens", "completion_tokens", "total_tokens", mode="before"
     )
     @classmethod
-    def _validate_usage_tokens(cls, value: Any, info: ValidationInfo) -> Optional[int]:
-        return _coerce_optional_int(value, info.field_name)
+    def _validate_usage_tokens(cls, value: Any, info: ValidationInfo) -> int:
+        if value is None:
+            return 0
+        return _coerce_int(value, info.field_name)
 
 
 class UsageStatsResponse(BaseModel):

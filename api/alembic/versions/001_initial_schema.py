@@ -71,12 +71,16 @@ def upgrade():
             sa.Column("phone_id", sa.String(), nullable=False),
             sa.Column("wh_token", sa.Text(), nullable=False),
             sa.Column(
-                "system_prompt", sa.Text(), server_default="You are a helpful assistant."
+                "system_prompt",
+                sa.Text(),
+                server_default="You are a helpful assistant.",
             ),
             sa.PrimaryKeyConstraint("id"),
         )
         op.create_index(op.f("ix_tenants_id"), "tenants", ["id"], unique=False)
-        op.create_index(op.f("ix_tenants_phone_id"), "tenants", ["phone_id"], unique=True)
+        op.create_index(
+            op.f("ix_tenants_phone_id"), "tenants", ["phone_id"], unique=True
+        )
     else:
         existing_indexes = {index["name"] for index in inspector.get_indexes("tenants")}
         if op.f("ix_tenants_id") not in existing_indexes:
@@ -94,11 +98,15 @@ def upgrade():
             sa.Column("tenant_id", sa.String(), nullable=False),
             sa.Column("wa_msg_id", sa.String(), nullable=True),
             sa.Column(
-                "role", sa.Enum("inbound", "assistant", name="role_enum"), nullable=False
+                "role",
+                sa.Enum("inbound", "assistant", name="role_enum"),
+                nullable=False,
             ),
             sa.Column("text", sa.Text(), nullable=False),
             sa.Column("tokens", sa.Integer(), nullable=True),
-            sa.Column("ts", sa.TIMESTAMP(), server_default=sa.func.now(), nullable=False),
+            sa.Column(
+                "ts", sa.TIMESTAMP(), server_default=sa.func.now(), nullable=False
+            ),
             sa.ForeignKeyConstraint(["tenant_id"], ["tenants.id"], ondelete="CASCADE"),
             sa.PrimaryKeyConstraint("id"),
             sa.UniqueConstraint("wa_msg_id"),
@@ -107,7 +115,9 @@ def upgrade():
             op.f("ix_messages_tenant_id"), "messages", ["tenant_id"], unique=False
         )
     else:
-        existing_indexes = {index["name"] for index in inspector.get_indexes("messages")}
+        existing_indexes = {
+            index["name"] for index in inspector.get_indexes("messages")
+        }
         if op.f("ix_messages_tenant_id") not in existing_indexes:
             op.create_index(
                 op.f("ix_messages_tenant_id"), "messages", ["tenant_id"], unique=False
@@ -131,7 +141,9 @@ def upgrade():
     else:
         existing_indexes = {index["name"] for index in inspector.get_indexes("faqs")}
         if op.f("ix_faqs_tenant_id") not in existing_indexes:
-            op.create_index(op.f("ix_faqs_tenant_id"), "faqs", ["tenant_id"], unique=False)
+            op.create_index(
+                op.f("ix_faqs_tenant_id"), "faqs", ["tenant_id"], unique=False
+            )
 
     usage_columns_to_add = [
         (
@@ -184,17 +196,30 @@ def upgrade():
             sa.ForeignKeyConstraint(["tenant_id"], ["tenants.id"], ondelete="CASCADE"),
             sa.PrimaryKeyConstraint("id"),
         )
-        op.create_index(op.f("ix_usage_tenant_id"), "usage", ["tenant_id"], unique=False)
+        op.create_index(
+            op.f("ix_usage_tenant_id"), "usage", ["tenant_id"], unique=False
+        )
     else:
-        existing_columns = {
-            column["name"] for column in inspector.get_columns("usage")
-        }
+        existing_columns = {column["name"] for column in inspector.get_columns("usage")}
+        newly_added_columns = []
         for column_name, column in usage_columns_to_add:
             if column_name not in existing_columns:
                 op.add_column("usage", column.copy())
+                newly_added_columns.append(column_name)
+        columns_now_present = existing_columns.union(newly_added_columns)
+        numeric_usage_columns = {"prompt_tokens", "completion_tokens", "total_tokens"}
+        for column_name in columns_now_present.intersection(numeric_usage_columns):
+            op.execute(
+                sa.text(
+                    f"UPDATE usage SET {column_name} = 0 "
+                    f"WHERE {column_name} IS NULL"
+                )
+            )
         existing_indexes = {index["name"] for index in inspector.get_indexes("usage")}
         if op.f("ix_usage_tenant_id") not in existing_indexes:
-            op.create_index(op.f("ix_usage_tenant_id"), "usage", ["tenant_id"], unique=False)
+            op.create_index(
+                op.f("ix_usage_tenant_id"), "usage", ["tenant_id"], unique=False
+            )
 
     if dialect == "postgresql":
         op.execute(
@@ -227,7 +252,10 @@ def upgrade():
             ),
             sa.Column("google_event_id", sa.String(), nullable=True),
             sa.Column(
-                "reminded", sa.Boolean(), nullable=False, server_default=sa.text("false")
+                "reminded",
+                sa.Boolean(),
+                nullable=False,
+                server_default=sa.text("false"),
             ),
             sa.Column(
                 "created_ts",
@@ -270,6 +298,18 @@ def upgrade():
 def downgrade():
     conn = op.get_bind()
     dialect = conn.dialect.name
+    inspector = sa.inspect(conn)
+
+    if inspector.has_table("usage"):
+        existing_columns = {column["name"] for column in inspector.get_columns("usage")}
+        for column_name in (
+            "model",
+            "prompt_tokens",
+            "completion_tokens",
+            "total_tokens",
+        ):
+            if column_name in existing_columns:
+                op.drop_column("usage", column_name)
 
     op.drop_table("appointments")
     if dialect == "postgresql":

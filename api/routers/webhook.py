@@ -170,6 +170,9 @@ async def process_message(
             direction="inbound",
             tokens=0,
             msg_ts=ts,  # Use converted datetime
+            model=None,
+            prompt_tokens=0,
+            completion_tokens=0,
             total_tokens=0,
         )
         db.add(usage_record)
@@ -235,6 +238,8 @@ async def process_message(
                     direction="outbound",
                     tokens=token_count,
                     msg_ts=ts,
+                    model=None,
+                    prompt_tokens=0,
                     total_tokens=token_count,
                     completion_tokens=token_count,
                 )
@@ -279,6 +284,8 @@ async def process_message(
                 direction="outbound",
                 tokens=token_count,
                 msg_ts=ts,
+                model=None,
+                prompt_tokens=0,
                 total_tokens=token_count,
                 completion_tokens=token_count,
             )

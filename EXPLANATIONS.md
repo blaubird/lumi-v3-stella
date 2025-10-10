@@ -62,3 +62,8 @@ yp1pcw-codex/fix-crash-related-to-pydantic-import
 - Synced the ORM, admin schemas, and responses to expose `model` and token counters with nullable defaults.
 - Standardised admin tenant identifiers as integer path params, coercing to string for persistence and keeping deprecated body tenant IDs compatible.
 
+## Oct 19 2025 · Admin usage 500 fix
+- **Root cause**: production usage table missed the new token/model columns so the admin usage query referenced non-existent fields.
+- **Fixes**: guarded the consolidated migration to add/backfill the four columns idempotently, taught webhook writers to populate the token counters, and normalised the admin schema/serialiser so `model`, token tallies, and `trace_id` always appear.
+- **Validation**: ran targeted Ruff/Black, verified Alembic upgrade logic for conditional column adds, and ensured responses coerce missing counters to zero for older rows.
+
