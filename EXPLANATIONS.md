@@ -57,3 +57,8 @@ yp1pcw-codex/fix-crash-related-to-pydantic-import
 - Added pgvector retrieval helpers, token utilities, and fallback messaging covering disabled AI, empty context, and API failures.
 - Extended `Usage` schema/migration for prompt/completion accounting and updated callers; added tiktoken dependency and config knobs for AI settings.
 
+## Oct 12 2025 · Usage telemetry & tenant ID hardening
+- Hardened the consolidated Alembic migration so it backfills missing usage token columns idempotently.
+- Synced the ORM, admin schemas, and responses to expose `model` and token counters with nullable defaults.
+- Standardised admin tenant identifiers as integer path params, coercing to string for persistence and keeping deprecated body tenant IDs compatible.
+
