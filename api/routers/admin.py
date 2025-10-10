@@ -1,10 +1,19 @@
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Query
+from fastapi import (
+    APIRouter,
+    Depends,
+    HTTPException,
+    BackgroundTasks,
+    Query,
+    Request,
+    Response,
+    Path,
+)
 from sqlalchemy.orm import Session
 from sqlalchemy import func
-from typing import List, Any, cast
+from typing import List, Any, cast, Sequence
 from deps import get_db
 from database import SessionLocal
-from models import Tenant, Message, FAQ, Usage
+from models import Tenant, Message, FAQ, Usage, Appointment
 from schemas.admin import (
     TenantCreate,
     TenantUpdate,
@@ -18,6 +27,8 @@ from schemas.admin import (
 )
 from deps import verify_admin_token
 from ai import generate_embedding
+from redis.asyncio import Redis
+from redis.exceptions import RedisError
 from logging_utils import get_logger
 
 # Initialize logger
@@ -29,6 +40,90 @@ router = APIRouter(prefix="/admin", tags=["Admin"])
 def _tenant_key(tenant_id: int) -> str:
     """Normalize tenant identifiers for database lookups."""
     return str(tenant_id)
+
+
+def resolve_tenants(db: Session, tenant_key: str) -> List[Tenant]:
+    """Resolve tenants matching the provided key across supported identifiers."""
+    matches: dict[str, Tenant] = {}
+
+    try:
+        pk = str(int(tenant_key))
+    except ValueError:
+        pk = None
+
+    if pk is not None:
+        for tenant in db.query(Tenant).filter(Tenant.id == pk).all():
+            matches[str(tenant.id)] = tenant
+
+    identifier_order = ["slug", "external_id", "phone_id", "name"]
+    for identifier in identifier_order:
+        if not hasattr(Tenant, identifier):
+            continue
+        column = cast(Any, getattr(Tenant, identifier))
+        for tenant in db.query(Tenant).filter(column == tenant_key).all():
+            matches[str(tenant.id)] = tenant
+
+    return list(matches.values())
+
+
+def _delete_tenant_records(db: Session, tenant_ids: Sequence[str]) -> int:
+    """Delete tenant-related records in child tables before removing tenants."""
+    if not tenant_ids:
+        return 0
+
+    total_rows = 0
+    related_tables = (
+        (Message, Message.tenant_id),
+        (FAQ, FAQ.tenant_id),
+        (Usage, Usage.tenant_id),
+        (Appointment, Appointment.tenant_id),
+    )
+
+    for model, column in related_tables:
+        total_rows += (
+            db.query(model)
+            .filter(column.in_(tenant_ids))
+            .delete(synchronize_session=False)
+        )
+
+    total_rows += (
+        db.query(Tenant)
+        .filter(Tenant.id.in_(tenant_ids))
+        .delete(synchronize_session=False)
+    )
+
+    return total_rows
+
+
+async def _invalidate_tenant_cache(
+    redis: Redis | None, tenant_ids: Sequence[str]
+) -> None:
+    if not tenant_ids:
+        return
+
+    if redis is None:
+        logger.warning(
+            "Redis unavailable; skipping tenant cache invalidation",
+            extra={"tenant_ids": tenant_ids},
+        )
+        return
+
+    try:
+        for tenant_id in tenant_ids:
+            pattern = f"tenant:{tenant_id}:*"
+            batch: list[str] = []
+            async for key in redis.scan_iter(match=pattern, count=100):
+                batch.append(key)
+                if len(batch) >= 100:
+                    await redis.unlink(*batch)
+                    batch.clear()
+            if batch:
+                await redis.unlink(*batch)
+    except RedisError as exc:
+        logger.warning(
+            "Failed to invalidate tenant cache",
+            extra={"tenant_ids": tenant_ids, "error": str(exc)},
+        )
 
 
 @router.get(
@@ -212,36 +307,65 @@ async def update_tenant(
         )
 
 
-@router.delete("/tenants/{tenant_id}", dependencies=[Depends(verify_admin_token)])
-async def delete_tenant(tenant_id: int, db: Session = Depends(get_db)):
-    """Delete a tenant"""
+@router.delete(
+    "/tenants/{tenant_key}",
+    status_code=204,
+    dependencies=[Depends(verify_admin_token)],
+    summary="Hard delete tenant data",
+    description=(
+        "Force-deletes tenants matching the provided key. Resolution order: primary "
+        "key id (when numeric), then slug, external_id, phone_id, and name. All "
+        "matching tenants are removed in a single transaction."
+    ),
+)
+async def hard_delete_tenant(
+    request: Request,
+    tenant_key: str = Path(
+        ...,
+        description=(
+            "Tenant identifier. Resolution order: numeric id → slug → external_id → "
+            "phone_id → name."
+        ),
+        examples=["1", "test_tenant_X", "565265096681520"],
+    ),
+    db: Session = Depends(get_db),
+):
+    tenants = resolve_tenants(db, tenant_key)
+    if not tenants:
+        logger.info(
+            "No tenants matched for hard delete", extra={"tenant_key": tenant_key}
+        )
+        return Response(status_code=204)
+
+    tenant_ids = [str(tenant.id) for tenant in tenants]
+
     try:
-        tenant_key = _tenant_key(tenant_id)
-        tenant = db.query(Tenant).filter(Tenant.id == tenant_key).first()
-        if not tenant:
-            logger.warning(
-                "Tenant not found for deletion", extra={"tenant_id": tenant_id}
-            )
-            raise HTTPException(status_code=404, detail="Tenant not found")
-
-        # Delete the tenant - child records will be deleted automatically via CASCADE
-        db.delete(tenant)
-        db.commit()
-
-        logger.info("Tenant deleted", extra={"tenant_id": tenant_id})
-        return {"status": "success", "message": f"Tenant {tenant_id} deleted"}
-    except HTTPException:
-        raise
-    except Exception as e:
+        with db.begin():
+            rows_affected = _delete_tenant_records(db, tenant_ids)
+    except Exception as exc:  # noqa: BLE001
+        if db.is_active:
+            db.rollback()
         logger.error(
-            "Error deleting tenant",
-            extra={"tenant_id": tenant_id, "error": str(e)},
+            "Failed to hard delete tenants",
+            extra={"tenant_key": tenant_key, "error": str(exc)},
             exc_info=True,
         )
-        raise HTTPException(
-            status_code=500,
-            detail=f"Internal server error while deleting tenant: {str(e)}",
-        )
+        raise HTTPException(status_code=500, detail="Failed to delete tenant(s).")
+
+    await _invalidate_tenant_cache(
+        cast(Redis | None, getattr(request.app.state, "redis", None)), tenant_ids
+    )
+
+    logger.info(
+        "Tenants hard deleted",
+        extra={
+            "tenant_key": tenant_key,
+            "tenant_ids": tenant_ids,
+            "rows_affected": rows_affected,
+        },
+    )
+
+    return Response(status_code=204)
 
 
 @router.get(

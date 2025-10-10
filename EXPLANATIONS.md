@@ -67,3 +67,8 @@ yp1pcw-codex/fix-crash-related-to-pydantic-import
 - **Fixes**: guarded the consolidated migration to add/backfill the four columns idempotently, taught webhook writers to populate the token counters, and normalised the admin schema/serialiser so `model`, token tallies, and `trace_id` always appear.
 - **Validation**: ran targeted Ruff/Black, verified Alembic upgrade logic for conditional column adds, and ensured responses coerce missing counters to zero for older rows.
 
+## Oct 24 2025 · Tenant hard delete endpoint
+- Added resolver that maps admin DELETE keys across id, slug, external_id, phone_id, and name, removing every matching tenant in one go.
+- Wrapped cascading deletes for messages, FAQs, usage, and appointments inside a single SQLAlchemy transaction and logged outcomes.
+- Added Redis eviction helper that scans `tenant:{id}:*` keys in batches, tolerating connectivity faults without aborting the purge.
+
