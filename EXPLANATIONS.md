@@ -72,3 +72,8 @@ yp1pcw-codex/fix-crash-related-to-pydantic-import
 - Wrapped cascading deletes for messages, FAQs, usage, and appointments inside a single SQLAlchemy transaction and logged outcomes.
 - Added Redis eviction helper that scans `tenant:{id}:*` keys in batches, tolerating connectivity faults without aborting the purge.
 
+## Oct 30 2025 · Tenant ID normalisation & usage telemetry fix
+- Normalised admin + RAG tenant identifiers to canonical strings via a shared utility so both numeric and legacy IDs resolve consistently.
+- Updated schemas, routers, and OpenAPI examples to surface tenant IDs as strings while still accepting integer inputs without 422 regressions.
+- Hardened usage queries/serialisers after adding idempotent migration guards so the admin usage endpoint returns token/model data without 500s.
+

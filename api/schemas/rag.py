@@ -4,6 +4,8 @@ from typing import Any, List, Optional, Union
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator
 
+from utils.tenant_ids import TenantIdNormalizationError, normalize_tenant_id
+
 
 def _coerce_int(value: Any, field_name: str) -> int:
     if isinstance(value, bool):
@@ -12,6 +14,13 @@ def _coerce_int(value: Any, field_name: str) -> int:
         return int(value)
     except (TypeError, ValueError) as exc:
         raise ValueError(f"{field_name} must be an integer") from exc
+
+
+def _coerce_tenant_id(value: Any, field_name: Optional[str]) -> str:
+    try:
+        return normalize_tenant_id(value, field_name=field_name)
+    except TenantIdNormalizationError as exc:
+        raise ValueError(str(exc)) from exc
 
 
 class FAQBase(BaseModel):
@@ -25,14 +34,14 @@ class FAQCreate(FAQBase):
 
 class FAQResponse(FAQBase):
     id: int
-    tenant_id: int
+    tenant_id: str = Field(examples=["1", "test_tenant_X"])
 
     model_config = ConfigDict(from_attributes=True)
 
     @field_validator("tenant_id", mode="before")
     @classmethod
-    def _validate_tenant_id(cls, value: Any, info: ValidationInfo) -> int:
-        return _coerce_int(value, info.field_name)
+    def _validate_tenant_id(cls, value: Any, info: ValidationInfo) -> str:
+        return _coerce_tenant_id(value, info.field_name)
 
 
 class QueryRequest(BaseModel):
