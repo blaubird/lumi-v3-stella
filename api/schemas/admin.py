@@ -6,6 +6,8 @@ from typing import Any, List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator
 
+from utils.tenant_ids import TenantIdNormalizationError, normalize_tenant_id
+
 
 def _coerce_int(value: Any, field_name: Optional[str]) -> int:
     label = field_name or "value"
@@ -17,16 +19,23 @@ def _coerce_int(value: Any, field_name: Optional[str]) -> int:
         raise ValueError(f"{label} must be an integer") from exc
 
 
+def _coerce_tenant_id(value: Any, field_name: Optional[str]) -> str:
+    try:
+        return normalize_tenant_id(value, field_name=field_name)
+    except TenantIdNormalizationError as exc:
+        raise ValueError(str(exc)) from exc
+
+
 class TenantBase(BaseModel):
-    id: int = Field(..., examples=[1])
+    id: str = Field(..., examples=["1", "test_tenant_X"])
     phone_id: str
     wh_token: str
     system_prompt: str
 
     @field_validator("id", mode="before")
     @classmethod
-    def _validate_id(cls, value: Any, info: ValidationInfo) -> int:
-        return _coerce_int(value, info.field_name)
+    def _validate_id(cls, value: Any, info: ValidationInfo) -> str:
+        return _coerce_tenant_id(value, info.field_name)
 
 
 class TenantCreate(TenantBase):
@@ -54,15 +63,15 @@ class FAQCreate(FAQBase):
 
 class FAQResponse(FAQBase):
     id: int
-    tenant_id: int
+    tenant_id: str = Field(examples=["1", "test_tenant_X"])
     embedding: Optional[Any] = None
 
     model_config = ConfigDict(from_attributes=True)
 
     @field_validator("tenant_id", mode="before")
     @classmethod
-    def _validate_tenant_id(cls, value: Any, info: ValidationInfo) -> int:
-        return _coerce_int(value, info.field_name)
+    def _validate_tenant_id(cls, value: Any, info: ValidationInfo) -> str:
+        return _coerce_tenant_id(value, info.field_name)
 
 
 class MessageBase(BaseModel):
@@ -72,7 +81,7 @@ class MessageBase(BaseModel):
 
 class MessageResponse(MessageBase):
     id: int
-    tenant_id: int
+    tenant_id: str = Field(examples=["1", "test_tenant_X"])
     wa_msg_id: Optional[str] = None
     tokens: Optional[int] = None
     ts: datetime
@@ -81,13 +90,13 @@ class MessageResponse(MessageBase):
 
     @field_validator("tenant_id", mode="before")
     @classmethod
-    def _validate_tenant_id(cls, value: Any, info: ValidationInfo) -> int:
-        return _coerce_int(value, info.field_name)
+    def _validate_tenant_id(cls, value: Any, info: ValidationInfo) -> str:
+        return _coerce_tenant_id(value, info.field_name)
 
 
 class UsageResponse(BaseModel):
     id: int
-    tenant_id: int
+    tenant_id: str = Field(examples=["1", "test_tenant_X"])
     direction: str
     tokens: int
     msg_ts: datetime
@@ -101,8 +110,8 @@ class UsageResponse(BaseModel):
 
     @field_validator("tenant_id", mode="before")
     @classmethod
-    def _validate_tenant_id(cls, value: Any, info: ValidationInfo) -> int:
-        return _coerce_int(value, info.field_name)
+    def _validate_tenant_id(cls, value: Any, info: ValidationInfo) -> str:
+        return _coerce_tenant_id(value, info.field_name)
 
     @field_validator(
         "prompt_tokens", "completion_tokens", "total_tokens", mode="before"

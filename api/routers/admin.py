@@ -10,7 +10,7 @@ from fastapi import (
 )
 from sqlalchemy.orm import Session
 from sqlalchemy import func
-from typing import List, Any, cast, Sequence
+from typing import Annotated, Any, List, Sequence, cast
 from deps import get_db
 from database import SessionLocal
 from models import Tenant, Message, FAQ, Usage, Appointment
@@ -30,6 +30,11 @@ from ai import generate_embedding
 from redis.asyncio import Redis
 from redis.exceptions import RedisError
 from logging_utils import get_logger
+from utils.tenant_ids import (
+    TENANT_ID_OPENAPI_EXAMPLES,
+    TenantIdNormalizationError,
+    normalize_tenant_id,
+)
 
 # Initialize logger
 logger = get_logger(__name__)
@@ -37,9 +42,13 @@ logger = get_logger(__name__)
 router = APIRouter(prefix="/admin", tags=["Admin"])
 
 
-def _tenant_key(tenant_id: int) -> str:
+def _tenant_key(tenant_id: Any) -> str:
     """Normalize tenant identifiers for database lookups."""
-    return str(tenant_id)
+
+    try:
+        return normalize_tenant_id(tenant_id)
+    except TenantIdNormalizationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 def resolve_tenants(db: Session, tenant_key: str) -> List[Tenant]:
@@ -220,23 +229,27 @@ async def create_tenant(tenant: TenantCreate, db: Session = Depends(get_db)):
     response_model=TenantResponse,
     dependencies=[Depends(verify_admin_token)],
 )
-async def get_tenant(tenant_id: int, db: Session = Depends(get_db)):
+async def get_tenant(
+    tenant_id: Annotated[str, Path(..., examples=TENANT_ID_OPENAPI_EXAMPLES)],
+    db: Session = Depends(get_db),
+):
     """Get a specific tenant by ID"""
+    tenant_key = tenant_id
     try:
         tenant_key = _tenant_key(tenant_id)
         tenant = db.query(Tenant).filter(Tenant.id == tenant_key).first()
         if not tenant:
-            logger.warning("Tenant not found", extra={"tenant_id": tenant_id})
+            logger.warning("Tenant not found", extra={"tenant_id": tenant_key})
             raise HTTPException(status_code=404, detail="Tenant not found")
 
-        logger.info("Retrieved tenant", extra={"tenant_id": tenant_id})
+        logger.info("Retrieved tenant", extra={"tenant_id": tenant_key})
         return tenant
     except HTTPException:
         raise
     except Exception as e:
         logger.error(
             "Error retrieving tenant",
-            extra={"tenant_id": tenant_id, "error": str(e)},
+            extra={"tenant_id": tenant_key, "error": str(e)},
             exc_info=e,
         )
         raise HTTPException(
@@ -251,15 +264,18 @@ async def get_tenant(tenant_id: int, db: Session = Depends(get_db)):
     dependencies=[Depends(verify_admin_token)],
 )
 async def update_tenant(
-    tenant_id: int, tenant: TenantUpdate, db: Session = Depends(get_db)
+    tenant_id: Annotated[str, Path(..., examples=TENANT_ID_OPENAPI_EXAMPLES)],
+    tenant: TenantUpdate,
+    db: Session = Depends(get_db),
 ):
     """Update a tenant"""
+    tenant_key = tenant_id
     try:
         tenant_key = _tenant_key(tenant_id)
         db_tenant = db.query(Tenant).filter(Tenant.id == tenant_key).first()
         if not db_tenant:
             logger.warning(
-                "Tenant not found for update", extra={"tenant_id": tenant_id}
+                "Tenant not found for update", extra={"tenant_id": tenant_key}
             )
             raise HTTPException(status_code=404, detail="Tenant not found")
 
@@ -291,14 +307,14 @@ async def update_tenant(
         db.commit()
         db.refresh(db_tenant)
 
-        logger.info("Tenant updated", extra={"tenant_id": tenant_id})
+        logger.info("Tenant updated", extra={"tenant_id": tenant_key})
         return db_tenant
     except HTTPException:
         raise
     except Exception as e:
         logger.error(
             "Error updating tenant",
-            extra={"tenant_id": tenant_id, "error": str(e)},
+            extra={"tenant_id": tenant_key, "error": str(e)},
             exc_info=e,
         )
         raise HTTPException(
@@ -320,16 +336,24 @@ async def update_tenant(
 )
 async def hard_delete_tenant(
     request: Request,
-    tenant_key: str = Path(
-        ...,
-        description=(
-            "Tenant identifier. Resolution order: numeric id → slug → external_id → "
-            "phone_id → name."
+    tenant_key: Annotated[
+        str,
+        Path(
+            ...,
+            description=(
+                "Tenant identifier. Resolution order: numeric id → slug → external_id → "
+                "phone_id → name."
+            ),
+            examples=["1", "test_tenant_X", "565265096681520"],
         ),
-        examples=["1", "test_tenant_X", "565265096681520"],
-    ),
+    ],
     db: Session = Depends(get_db),
 ):
+    try:
+        tenant_key = normalize_tenant_id(tenant_key, field_name="tenant_key")
+    except TenantIdNormalizationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
     tenants = resolve_tenants(db, tenant_key)
     if not tenants:
         logger.info(
@@ -374,15 +398,20 @@ async def hard_delete_tenant(
     dependencies=[Depends(verify_admin_token)],
 )
 async def get_tenant_messages(
-    tenant_id: int, limit: int = 50, offset: int = 0, db: Session = Depends(get_db)
+    tenant_id: Annotated[str, Path(..., examples=TENANT_ID_OPENAPI_EXAMPLES)],
+    limit: int = 50,
+    offset: int = 0,
+    db: Session = Depends(get_db),
 ):
     """Get messages for a specific tenant"""
+    tenant_key = tenant_id
     try:
         tenant_key = _tenant_key(tenant_id)
         tenant = db.query(Tenant).filter(Tenant.id == tenant_key).first()
         if not tenant:
             logger.warning(
-                "Tenant not found for message retrieval", extra={"tenant_id": tenant_id}
+                "Tenant not found for message retrieval",
+                extra={"tenant_id": tenant_key},
             )
             raise HTTPException(status_code=404, detail="Tenant not found")
 
@@ -397,7 +426,7 @@ async def get_tenant_messages(
 
         logger.info(
             "Retrieved messages for tenant",
-            extra={"tenant_id": tenant_id, "count": len(messages)},
+            extra={"tenant_id": tenant_key, "count": len(messages)},
         )
         return messages
     except HTTPException:
@@ -405,7 +434,7 @@ async def get_tenant_messages(
     except Exception as e:
         logger.error(
             "Error retrieving tenant messages",
-            extra={"tenant_id": tenant_id, "error": str(e)},
+            extra={"tenant_id": tenant_key, "error": str(e)},
             exc_info=e,
         )
         raise HTTPException(
@@ -419,14 +448,18 @@ async def get_tenant_messages(
     response_model=List[FAQResponse],
     dependencies=[Depends(verify_admin_token)],
 )
-async def get_tenant_faqs(tenant_id: int, db: Session = Depends(get_db)):
+async def get_tenant_faqs(
+    tenant_id: Annotated[str, Path(..., examples=TENANT_ID_OPENAPI_EXAMPLES)],
+    db: Session = Depends(get_db),
+):
     """Get FAQs for a specific tenant"""
+    tenant_key = tenant_id
     try:
         tenant_key = _tenant_key(tenant_id)
         tenant = db.query(Tenant).filter(Tenant.id == tenant_key).first()
         if not tenant:
             logger.warning(
-                "Tenant not found for FAQ retrieval", extra={"tenant_id": tenant_id}
+                "Tenant not found for FAQ retrieval", extra={"tenant_id": tenant_key}
             )
             raise HTTPException(status_code=404, detail="Tenant not found")
 
@@ -434,7 +467,7 @@ async def get_tenant_faqs(tenant_id: int, db: Session = Depends(get_db)):
 
         logger.info(
             "Retrieved FAQs for tenant",
-            extra={"tenant_id": tenant_id, "count": len(faqs)},
+            extra={"tenant_id": tenant_key, "count": len(faqs)},
         )
         return faqs
     except HTTPException:
@@ -442,7 +475,7 @@ async def get_tenant_faqs(tenant_id: int, db: Session = Depends(get_db)):
     except Exception as e:
         logger.error(
             "Error retrieving tenant FAQs",
-            extra={"tenant_id": tenant_id, "error": str(e)},
+            extra={"tenant_id": tenant_key, "error": str(e)},
             exc_info=e,
         )
         raise HTTPException(
@@ -458,18 +491,19 @@ async def get_tenant_faqs(tenant_id: int, db: Session = Depends(get_db)):
     dependencies=[Depends(verify_admin_token)],
 )
 async def create_faq(
-    tenant_id: int,
+    tenant_id: Annotated[str, Path(..., examples=TENANT_ID_OPENAPI_EXAMPLES)],
     faq: FAQCreate,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
 ):
     """Create a new FAQ for a tenant"""
+    tenant_key = tenant_id
     try:
         tenant_key = _tenant_key(tenant_id)
         tenant = db.query(Tenant).filter(Tenant.id == tenant_key).first()
         if not tenant:
             logger.warning(
-                "Tenant not found for FAQ creation", extra={"tenant_id": tenant_id}
+                "Tenant not found for FAQ creation", extra={"tenant_id": tenant_key}
             )
             raise HTTPException(status_code=404, detail="Tenant not found")
 
@@ -482,7 +516,7 @@ async def create_faq(
         except Exception as db_error:
             logger.error(
                 "Database error creating FAQ",
-                extra={"tenant_id": tenant_id, "error": str(db_error)},
+                extra={"tenant_id": tenant_key, "error": str(db_error)},
                 exc_info=db_error,
             )
             raise HTTPException(
@@ -502,7 +536,7 @@ async def create_faq(
             "FAQ created",
             extra={
                 "faq_id": db_faq.id,
-                "tenant_id": tenant_id,
+                "tenant_id": tenant_key,
                 "question_length": len(faq.question),
                 "answer_length": len(faq.answer),
             },
@@ -514,7 +548,7 @@ async def create_faq(
     except Exception as e:
         logger.error(
             "Error creating FAQ",
-            extra={"tenant_id": tenant_id, "error": str(e)},
+            extra={"tenant_id": tenant_key, "error": str(e)},
             exc_info=e,
         )
         raise HTTPException(
@@ -529,18 +563,19 @@ async def create_faq(
     dependencies=[Depends(verify_admin_token)],
 )
 async def get_tenant_usage(
-    tenant_id: int,
+    tenant_id: Annotated[str, Path(..., examples=TENANT_ID_OPENAPI_EXAMPLES)],
     limit: int = Query(50, ge=1, le=100),
     offset: int = Query(0, ge=0),
     db: Session = Depends(get_db),
 ):
     """Get usage statistics for a specific tenant"""
+    tenant_key = tenant_id
     try:
         tenant_key = _tenant_key(tenant_id)
         tenant = db.query(Tenant).filter(Tenant.id == tenant_key).first()
         if not tenant:
             logger.warning(
-                "Tenant not found for usage retrieval", extra={"tenant_id": tenant_id}
+                "Tenant not found for usage retrieval", extra={"tenant_id": tenant_key}
             )
             raise HTTPException(status_code=404, detail="Tenant not found")
 
@@ -573,7 +608,7 @@ async def get_tenant_usage(
         logger.info(
             "Retrieved usage for tenant",
             extra={
-                "tenant_id": tenant_id,
+                "tenant_id": tenant_key,
                 "items_count": len(usage_items),
                 "total_inbound": total_inbound,
                 "total_outbound": total_outbound,
@@ -590,7 +625,7 @@ async def get_tenant_usage(
     except Exception as e:
         logger.error(
             "Error retrieving tenant usage",
-            extra={"tenant_id": tenant_id, "error": str(e)},
+            extra={"tenant_id": tenant_key, "error": str(e)},
             exc_info=e,
         )
         raise HTTPException(
@@ -606,7 +641,7 @@ async def get_tenant_usage(
     dependencies=[Depends(verify_admin_token)],
 )
 async def bulk_import_faq(
-    tenant_id: int,
+    tenant_id: Annotated[str, Path(..., examples=TENANT_ID_OPENAPI_EXAMPLES)],
     import_data: BulkFAQImportRequest,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
@@ -614,13 +649,14 @@ async def bulk_import_faq(
     """
     Bulk import multiple FAQ entries for a tenant
     """
+    tenant_key = tenant_id
     try:
         # Verify tenant exists
         tenant_key = _tenant_key(tenant_id)
         tenant = db.query(Tenant).filter(Tenant.id == tenant_key).first()
         if not tenant:
             logger.warning(
-                "Tenant not found for bulk FAQ import", extra={"tenant_id": tenant_id}
+                "Tenant not found for bulk FAQ import", extra={"tenant_id": tenant_key}
             )
             raise HTTPException(
                 status_code=404, detail=f"Tenant with id {tenant_id} not found."
@@ -657,7 +693,7 @@ async def bulk_import_faq(
                 logger.error(
                     "Error in bulk FAQ import",
                     extra={
-                        "tenant_id": tenant_id,
+                        "tenant_id": tenant_key,
                         "question": item.question[:50],
                         "error": str(e),
                     },
@@ -667,7 +703,7 @@ async def bulk_import_faq(
         logger.info(
             "Bulk FAQ import completed",
             extra={
-                "tenant_id": tenant_id,
+                "tenant_id": tenant_key,
                 "total_items": len(import_data.items),
                 "successful_items": successful_items,
                 "failed_items": failed_items,
@@ -685,7 +721,7 @@ async def bulk_import_faq(
     except Exception as e:
         logger.error(
             "Error in bulk FAQ import",
-            extra={"tenant_id": tenant_id, "error": str(e)},
+            extra={"tenant_id": tenant_key, "error": str(e)},
             exc_info=e,
         )
         raise HTTPException(
