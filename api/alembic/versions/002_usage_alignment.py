@@ -110,7 +110,7 @@ def upgrade() -> None:
                     "nullable": USAGE_COLUMNS[name].nullable,
                 }
 
-        for column_name in ("model", "direction", "msg_ts"):
+        for column_name in ("model", "direction", "msg_ts", "trace_id"):
             _add_column_if_missing(column_name)
 
         for numeric_name in ("prompt_tokens", "completion_tokens", "total_tokens"):
@@ -125,7 +125,7 @@ def upgrade() -> None:
             op.alter_column(
                 "usage",
                 numeric_name,
-                existing_type=sa.Integer(),
+                existing_type=columns[numeric_name]["type"],
                 nullable=False,
                 server_default=sa.text("0"),
                 schema=SCHEMA,
@@ -135,7 +135,7 @@ def upgrade() -> None:
             op.alter_column(
                 "usage",
                 "tokens",
-                existing_type=sa.Integer(),
+                existing_type=columns["tokens"]["type"],
                 nullable=True,
                 schema=SCHEMA,
             )
@@ -169,16 +169,9 @@ def upgrade() -> None:
 
         if "direction" in columns:
             direction_type = columns["direction"]["type"]
-            if isinstance(direction_type, sa.Enum):
-                if dialect == "postgresql":
-                    op.execute(
-                        sa.text(
-                            f"ALTER TABLE {_qualified('usage')} "
-                            "ALTER COLUMN direction TYPE VARCHAR(64) "
-                            "USING direction::text"
-                        )
-                    )
-                else:
+            direction_existing_type = direction_type
+            if isinstance(direction_type, sa.String):
+                if getattr(direction_type, "length", 0) and direction_type.length < 64:
                     op.alter_column(
                         "usage",
                         "direction",
@@ -186,8 +179,17 @@ def upgrade() -> None:
                         type_=sa.String(length=64),
                         schema=SCHEMA,
                     )
-                direction_type = sa.String(length=64)
-            if getattr(direction_type, "length", 0) < 64:
+                    direction_existing_type = sa.String(length=64)
+                elif getattr(direction_type, "length", None) is None:
+                    op.alter_column(
+                        "usage",
+                        "direction",
+                        existing_type=direction_type,
+                        type_=sa.String(length=64),
+                        schema=SCHEMA,
+                    )
+                    direction_existing_type = sa.String(length=64)
+            elif not isinstance(direction_type, sa.Enum):
                 op.alter_column(
                     "usage",
                     "direction",
@@ -195,13 +197,37 @@ def upgrade() -> None:
                     type_=sa.String(length=64),
                     schema=SCHEMA,
                 )
-            op.alter_column(
-                "usage",
-                "direction",
-                existing_type=sa.String(length=64),
-                nullable=True,
-                schema=SCHEMA,
-            )
+                direction_existing_type = sa.String(length=64)
+            if not columns["direction"].get("nullable", True):
+                op.alter_column(
+                    "usage",
+                    "direction",
+                    existing_type=direction_existing_type,
+                    nullable=True,
+                    schema=SCHEMA,
+                )
+
+        if "model" in columns:
+            model_type = columns["model"]["type"]
+            if not isinstance(model_type, sa.String) or getattr(model_type, "length", 0) < 255:
+                op.alter_column(
+                    "usage",
+                    "model",
+                    existing_type=model_type,
+                    type_=sa.String(length=255),
+                    schema=SCHEMA,
+                )
+
+        if "trace_id" in columns:
+            trace_type = columns["trace_id"]["type"]
+            if not isinstance(trace_type, sa.String) or getattr(trace_type, "length", 0) < 255:
+                op.alter_column(
+                    "usage",
+                    "trace_id",
+                    existing_type=trace_type,
+                    type_=sa.String(length=255),
+                    schema=SCHEMA,
+                )
 
         if "msg_ts" in columns:
             msg_ts_type = columns["msg_ts"]["type"]
@@ -293,6 +319,12 @@ def downgrade() -> None:
     if not inspector.has_table("usage", schema=SCHEMA):
         return
 
-    # Canonical revision 001 already defines the full usage shape.
-    # No-op downgrade keeps the schema aligned with that baseline.
-    return
+    existing_indexes = {
+        index["name"] for index in inspector.get_indexes("usage", schema=SCHEMA)
+    }
+
+    for index_name in ("ix_usage_tenant_id_msg_ts", "ix_usage_tenant_id_id"):
+        if index_name in existing_indexes:
+            op.drop_index(index_name, table_name="usage", schema=SCHEMA)
+
+    # Leave columns intact to avoid data loss when rolling back revisions.

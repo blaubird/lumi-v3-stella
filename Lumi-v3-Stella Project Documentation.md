@@ -104,11 +104,11 @@ The `api/` directory is the heart of the `lumi-v3-stella` application, containin
 
 `lumi-v3-stella` is designed for cloud deployment, with a strong emphasis on leveraging Platform as a Service (PaaS) providers like Railway for simplified hosting and management.
 
-### Usage trace ID migration (`003_add_trace_id_to_usage`)
+### Usage repair migration (`002_usage_alignment`)
 
-- The Alembic repair migration checks for `public.usage.trace_id` and only adds the nullable column if it is absent, making it safe to run repeatedly.
-- Older rows will keep `NULL` in `trace_id`; API serializers treat the field as optional and the AI stack now backfills a UUIDv4 for every new usage record.
-- No other schema elements are touched; downgrading the revision drops only the column created by this migration.
+- The consolidated Alembic repair migration now guarantees the full `public.usage` shape (including `trace_id`) in a single, idempotent pass.
+- It guards every change through the SQLAlchemy inspector so missing columns, widened VARCHAR lengths, and token defaults are only applied when needed.
+- Helpful composite indexes—`(tenant_id, msg_ts)` and `(tenant_id, id)`—are created if absent to keep admin queries fast, while downgrades only remove the indexes introduced by this repair.
 
 ### Railway Hosting
 
