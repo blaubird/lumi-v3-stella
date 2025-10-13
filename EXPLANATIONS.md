@@ -77,3 +77,8 @@ yp1pcw-codex/fix-crash-related-to-pydantic-import
 - Updated schemas, routers, and OpenAPI examples to surface tenant IDs as strings while still accepting integer inputs without 422 regressions.
 - Hardened usage queries/serialisers after adding idempotent migration guards so the admin usage endpoint returns token/model data without 500s.
 
+## Nov 3 2025 · Usage schema alignment & smoke runner
+- Added Alembic revision `002_usage_alignment` that creates or amends `usage` to match ORM expectations (VARCHAR direction, nullable token counts, msg timestamp default, token column defaults) and seeds composite indexes for tenant lookups.
+- Synced `Usage` ORM + admin response schema with the widened types/defaults to guarantee serialisation without 500s once the migration runs.
+- Introduced `api/scripts/smoke_runner.sh` to hit health, tenant CRUD, and usage endpoints against a remote deployment with a PASS/FAIL summary for quick regression checks.
+

@@ -97,8 +97,8 @@ class MessageResponse(MessageBase):
 class UsageResponse(BaseModel):
     id: int
     tenant_id: str = Field(examples=["1", "test_tenant_X"])
-    direction: str
-    tokens: int
+    direction: Optional[str] = None
+    tokens: Optional[int] = None
     msg_ts: datetime
     model: Optional[str] = None
     prompt_tokens: int = Field(default=0, ge=0)

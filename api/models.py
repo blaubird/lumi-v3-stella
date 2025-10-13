@@ -8,6 +8,7 @@ from sqlalchemy import (
     TIMESTAMP,
     DateTime,
     Boolean,
+    BigInteger,
 )
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -80,22 +81,20 @@ class FAQ(Base):
 class Usage(Base):
     __tablename__ = "usage"
 
-    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    id = Column(BigInteger, primary_key=True, index=True, autoincrement=True)
     tenant_id = Column(
         String(255),
         ForeignKey("tenants.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
-    direction = Column(
-        Enum("inbound", "outbound", name="direction_enum"), nullable=False
-    )
-    tokens = Column(Integer, nullable=False)
-    msg_ts = Column(DateTime(timezone=True), nullable=False)
+    direction = Column(String(64), nullable=True)
+    tokens = Column(Integer, nullable=True)
+    msg_ts = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     model = Column(String(255), nullable=True)
-    prompt_tokens = Column(Integer, nullable=True, default=0, server_default="0")
-    completion_tokens = Column(Integer, nullable=True, default=0, server_default="0")
-    total_tokens = Column(Integer, nullable=True, default=0, server_default="0")
+    prompt_tokens = Column(Integer, nullable=False, default=0, server_default="0")
+    completion_tokens = Column(Integer, nullable=False, default=0, server_default="0")
+    total_tokens = Column(Integer, nullable=False, default=0, server_default="0")
     trace_id = Column(String(255), nullable=True)
 
     # Relationships
