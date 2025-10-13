@@ -2,6 +2,7 @@ from logging.config import fileConfig
 
 from sqlalchemy import engine_from_config
 from sqlalchemy import pool
+import sqlalchemy as sa
 import os
 import sys
 
@@ -29,6 +30,8 @@ if config.config_file_name is not None:
 # for 'autogenerate' support
 target_metadata = Base.metadata
 
+DEFAULT_SCHEMA = "public"
+
 # other values from the config, defined by the needs of env.py,
 # can be acquired:
 # my_important_option = config.get_main_option("my_important_option")
@@ -53,6 +56,7 @@ def run_migrations_offline() -> None:
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
+        version_table_schema=DEFAULT_SCHEMA,
     )
 
     with context.begin_transaction():
@@ -73,7 +77,14 @@ def run_migrations_online() -> None:
     )
 
     with connectable.connect() as connection:
-        context.configure(connection=connection, target_metadata=target_metadata)
+        if connection.dialect.name == "postgresql":
+            connection.execute(sa.text(f"SET search_path TO {DEFAULT_SCHEMA}"))
+
+        context.configure(
+            connection=connection,
+            target_metadata=target_metadata,
+            version_table_schema=DEFAULT_SCHEMA,
+        )
 
         with context.begin_transaction():
             context.run_migrations()

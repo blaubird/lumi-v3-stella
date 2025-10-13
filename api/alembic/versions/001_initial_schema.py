@@ -1,328 +1,285 @@
-"""Consolidated schema migration
+"""Canonical initial schema.
+
 Revision ID: 001_initial_schema
 Revises:
 Create Date: 2025-05-31 12:57:00.000000
-
 """
 
-from alembic import op
+from __future__ import annotations
+
 import sqlalchemy as sa
+from alembic import op
 from pgvector.sqlalchemy import Vector
 
-# revision identifiers, used by Alembic.
 revision = "001_initial_schema"
 down_revision = None
 branch_labels = None
 depends_on = None
 
+SCHEMA = "public"
 
-def upgrade():
+
+def _ensure_postgres_enum(dialect: str, name: str, values: list[str]) -> None:
+    if dialect != "postgresql":
+        return
+
+    quoted_values = ", ".join(f"'{value}'" for value in values)
+    op.execute(
+        sa.text(
+            f"""
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1
+                    FROM pg_type t
+                    JOIN pg_namespace n ON n.oid = t.typnamespace
+                    WHERE t.typname = '{name}' AND n.nspname = '{SCHEMA}'
+                ) THEN
+                    CREATE TYPE {SCHEMA}.{name} AS ENUM ({quoted_values});
+                END IF;
+            END
+            $$;
+            """
+        )
+    )
+
+
+def upgrade() -> None:
     conn = op.get_bind()
     dialect = conn.dialect.name
 
     if dialect == "postgresql":
-        op.execute("CREATE EXTENSION IF NOT EXISTS vector;")
+        op.execute(sa.text("CREATE EXTENSION IF NOT EXISTS vector"))
 
+    _ensure_postgres_enum(dialect, "role_enum", ["inbound", "assistant"])
+    _ensure_postgres_enum(dialect, "direction_enum", ["inbound", "outbound"])
+    _ensure_postgres_enum(
+        dialect,
+        "appt_status_enum",
+        ["pending", "confirmed", "cancelled"],
+    )
+
+    role_enum_kwargs = {"name": "role_enum"}
+    appt_status_kwargs = {"name": "appt_status_enum"}
     if dialect == "postgresql":
-        op.execute(
-            """
-    DO $$
-    BEGIN
-        IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'role_enum') THEN
-            CREATE TYPE role_enum AS ENUM ('inbound', 'assistant');
-        ELSE
-            PERFORM 1 FROM pg_enum WHERE enumlabel='inbound' AND enumtypid = 'role_enum'::regtype;
-            IF NOT FOUND THEN
-                ALTER TYPE role_enum ADD VALUE 'inbound';
-            END IF;
-            PERFORM 1 FROM pg_enum WHERE enumlabel='assistant' AND enumtypid = 'role_enum'::regtype;
-            IF NOT FOUND THEN
-                ALTER TYPE role_enum ADD VALUE 'assistant';
-            END IF;
-        END IF;
-    EXCEPTION
-        WHEN duplicate_object THEN NULL;
-    END
-    $$;
-            """
-        )
+        role_enum_kwargs.update({"schema": SCHEMA, "create_type": False})
+        appt_status_kwargs.update({"schema": SCHEMA, "create_type": False})
 
-        op.execute(
-            """
-    DO $$
-    BEGIN
-        IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'direction_enum') THEN
-            CREATE TYPE direction_enum AS ENUM ('inbound', 'outbound');
-        END IF;
-    EXCEPTION
-        WHEN duplicate_object THEN NULL;
-    END
-    $$;
-            """
-        )
+    role_enum = sa.Enum("inbound", "assistant", **role_enum_kwargs)
+    appt_status_enum = sa.Enum(
+        "pending", "confirmed", "cancelled", **appt_status_kwargs
+    )
 
-    inspector = sa.inspect(conn)
-
-    # Create tenants table when missing
-    if not inspector.has_table("tenants"):
-        op.create_table(
-            "tenants",
-            sa.Column("id", sa.String(), nullable=False),
-            sa.Column("phone_id", sa.String(), nullable=False),
-            sa.Column("wh_token", sa.Text(), nullable=False),
-            sa.Column(
-                "system_prompt",
-                sa.Text(),
-                server_default="You are a helpful assistant.",
-            ),
-            sa.PrimaryKeyConstraint("id"),
-        )
-        op.create_index(op.f("ix_tenants_id"), "tenants", ["id"], unique=False)
-        op.create_index(
-            op.f("ix_tenants_phone_id"), "tenants", ["phone_id"], unique=True
-        )
-    else:
-        existing_indexes = {index["name"] for index in inspector.get_indexes("tenants")}
-        if op.f("ix_tenants_id") not in existing_indexes:
-            op.create_index(op.f("ix_tenants_id"), "tenants", ["id"], unique=False)
-        if op.f("ix_tenants_phone_id") not in existing_indexes:
-            op.create_index(
-                op.f("ix_tenants_phone_id"), "tenants", ["phone_id"], unique=True
-            )
-
-    # Create messages table when missing
-    if not inspector.has_table("messages"):
-        op.create_table(
-            "messages",
-            sa.Column("id", sa.Integer(), autoincrement=True, nullable=False),
-            sa.Column("tenant_id", sa.String(), nullable=False),
-            sa.Column("wa_msg_id", sa.String(), nullable=True),
-            sa.Column(
-                "role",
-                sa.Enum("inbound", "assistant", name="role_enum"),
-                nullable=False,
-            ),
-            sa.Column("text", sa.Text(), nullable=False),
-            sa.Column("tokens", sa.Integer(), nullable=True),
-            sa.Column(
-                "ts", sa.TIMESTAMP(), server_default=sa.func.now(), nullable=False
-            ),
-            sa.ForeignKeyConstraint(["tenant_id"], ["tenants.id"], ondelete="CASCADE"),
-            sa.PrimaryKeyConstraint("id"),
-            sa.UniqueConstraint("wa_msg_id"),
-        )
-        op.create_index(
-            op.f("ix_messages_tenant_id"), "messages", ["tenant_id"], unique=False
-        )
-    else:
-        existing_indexes = {
-            index["name"] for index in inspector.get_indexes("messages")
-        }
-        if op.f("ix_messages_tenant_id") not in existing_indexes:
-            op.create_index(
-                op.f("ix_messages_tenant_id"), "messages", ["tenant_id"], unique=False
-            )
-
-    # Create faqs table when missing
-    if not inspector.has_table("faqs"):
-        op.create_table(
-            "faqs",
-            sa.Column("id", sa.Integer(), autoincrement=True, nullable=False),
-            sa.Column("tenant_id", sa.String(), nullable=False),
-            sa.Column(
-                "question", sa.String(), nullable=False
-            ),  # Changed from Text to String for exact matching
-            sa.Column("answer", sa.Text(), nullable=False),
-            sa.Column("embedding", Vector(1536), nullable=True),
-            sa.ForeignKeyConstraint(["tenant_id"], ["tenants.id"], ondelete="CASCADE"),
-            sa.PrimaryKeyConstraint("id"),
-        )
-        op.create_index(op.f("ix_faqs_tenant_id"), "faqs", ["tenant_id"], unique=False)
-    else:
-        existing_indexes = {index["name"] for index in inspector.get_indexes("faqs")}
-        if op.f("ix_faqs_tenant_id") not in existing_indexes:
-            op.create_index(
-                op.f("ix_faqs_tenant_id"), "faqs", ["tenant_id"], unique=False
-            )
-
-    usage_columns_to_add = [
-        (
-            "model",
-            sa.Column("model", sa.String(length=255), nullable=True),
+    op.create_table(
+        "tenants",
+        sa.Column("id", sa.String(length=255), nullable=False),
+        sa.Column("phone_id", sa.String(length=255), nullable=False),
+        sa.Column("wh_token", sa.Text(), nullable=False),
+        sa.Column(
+            "system_prompt",
+            sa.Text(),
+            server_default="You are a helpful assistant.",
         ),
-        (
+        sa.PrimaryKeyConstraint("id"),
+        schema=SCHEMA,
+    )
+    op.create_index(
+        op.f("ix_tenants_id"),
+        "tenants",
+        ["id"],
+        unique=False,
+        schema=SCHEMA,
+    )
+    op.create_index(
+        op.f("ix_tenants_phone_id"),
+        "tenants",
+        ["phone_id"],
+        unique=True,
+        schema=SCHEMA,
+    )
+
+    op.create_table(
+        "messages",
+        sa.Column("id", sa.BigInteger(), autoincrement=True, nullable=False),
+        sa.Column("tenant_id", sa.String(length=255), nullable=False),
+        sa.Column("wa_msg_id", sa.String(length=255), nullable=True),
+        sa.Column("role", role_enum, nullable=False),
+        sa.Column("text", sa.Text(), nullable=False),
+        sa.Column("tokens", sa.Integer(), nullable=True),
+        sa.Column(
+            "ts",
+            sa.TIMESTAMP(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
+        ),
+        sa.ForeignKeyConstraint(
+            ["tenant_id"],
+            [f"{SCHEMA}.tenants.id"],
+            ondelete="CASCADE",
+        ),
+        sa.PrimaryKeyConstraint("id"),
+        sa.UniqueConstraint("wa_msg_id", name="uq_messages_wa_msg_id"),
+        schema=SCHEMA,
+    )
+    op.create_index(
+        op.f("ix_messages_tenant_id"),
+        "messages",
+        ["tenant_id"],
+        unique=False,
+        schema=SCHEMA,
+    )
+
+    op.create_table(
+        "faqs",
+        sa.Column("id", sa.BigInteger(), autoincrement=True, nullable=False),
+        sa.Column("tenant_id", sa.String(length=255), nullable=False),
+        sa.Column("question", sa.String(length=512), nullable=False),
+        sa.Column("answer", sa.Text(), nullable=False),
+        sa.Column("embedding", Vector(1536), nullable=True),
+        sa.ForeignKeyConstraint(
+            ["tenant_id"],
+            [f"{SCHEMA}.tenants.id"],
+            ondelete="CASCADE",
+        ),
+        sa.PrimaryKeyConstraint("id"),
+        schema=SCHEMA,
+    )
+    op.create_index(
+        op.f("ix_faqs_tenant_id"),
+        "faqs",
+        ["tenant_id"],
+        unique=False,
+        schema=SCHEMA,
+    )
+
+    op.create_table(
+        "usage",
+        sa.Column("id", sa.BigInteger(), autoincrement=True, nullable=False),
+        sa.Column("tenant_id", sa.String(length=255), nullable=False),
+        sa.Column("direction", sa.String(length=64), nullable=True),
+        sa.Column(
+            "msg_ts",
+            sa.TIMESTAMP(timezone=True),
+            nullable=False,
+            server_default=sa.text("now()"),
+        ),
+        sa.Column("tokens", sa.Integer(), nullable=True),
+        sa.Column("model", sa.String(length=255), nullable=True),
+        sa.Column(
             "prompt_tokens",
-            sa.Column(
-                "prompt_tokens",
-                sa.Integer(),
-                nullable=True,
-                server_default="0",
-            ),
+            sa.Integer(),
+            nullable=False,
+            server_default=sa.text("0"),
         ),
-        (
+        sa.Column(
             "completion_tokens",
-            sa.Column(
-                "completion_tokens",
-                sa.Integer(),
-                nullable=True,
-                server_default="0",
-            ),
+            sa.Integer(),
+            nullable=False,
+            server_default=sa.text("0"),
         ),
-        (
+        sa.Column(
             "total_tokens",
-            sa.Column(
-                "total_tokens",
-                sa.Integer(),
-                nullable=True,
-                server_default="0",
-            ),
+            sa.Integer(),
+            nullable=False,
+            server_default=sa.text("0"),
         ),
-    ]
+        sa.Column("trace_id", sa.String(length=255), nullable=True),
+        sa.ForeignKeyConstraint(
+            ["tenant_id"],
+            [f"{SCHEMA}.tenants.id"],
+            ondelete="CASCADE",
+        ),
+        sa.PrimaryKeyConstraint("id"),
+        schema=SCHEMA,
+    )
+    op.create_index(
+        op.f("ix_usage_tenant_id"),
+        "usage",
+        ["tenant_id"],
+        unique=False,
+        schema=SCHEMA,
+    )
+    op.create_index(
+        "ix_usage_tenant_id_msg_ts",
+        "usage",
+        ["tenant_id", "msg_ts"],
+        unique=False,
+        schema=SCHEMA,
+    )
+    op.create_index(
+        "ix_usage_tenant_id_id",
+        "usage",
+        ["tenant_id", "id"],
+        unique=False,
+        schema=SCHEMA,
+    )
 
-    if not inspector.has_table("usage"):
-        op.create_table(
-            "usage",
-            sa.Column("id", sa.Integer(), autoincrement=True, nullable=False),
-            sa.Column("tenant_id", sa.String(), nullable=False),
-            sa.Column(
-                "direction",
-                sa.Enum("inbound", "outbound", name="direction_enum"),
-                nullable=False,
-            ),
-            sa.Column("tokens", sa.Integer(), nullable=False),
-            sa.Column("msg_ts", sa.TIMESTAMP(timezone=True), nullable=False),
-            *[column.copy() for _, column in usage_columns_to_add],
-            sa.Column("trace_id", sa.String(length=255), nullable=True),
-            sa.ForeignKeyConstraint(["tenant_id"], ["tenants.id"], ondelete="CASCADE"),
-            sa.PrimaryKeyConstraint("id"),
-        )
-        op.create_index(
-            op.f("ix_usage_tenant_id"), "usage", ["tenant_id"], unique=False
-        )
-    else:
-        existing_columns = {column["name"] for column in inspector.get_columns("usage")}
-        newly_added_columns = []
-        for column_name, column in usage_columns_to_add:
-            if column_name not in existing_columns:
-                op.add_column("usage", column.copy())
-                newly_added_columns.append(column_name)
-        columns_now_present = existing_columns.union(newly_added_columns)
-        numeric_usage_columns = {"prompt_tokens", "completion_tokens", "total_tokens"}
-        for column_name in columns_now_present.intersection(numeric_usage_columns):
-            op.execute(
-                sa.text(
-                    f"UPDATE usage SET {column_name} = 0 "
-                    f"WHERE {column_name} IS NULL"
-                )
-            )
-        existing_indexes = {index["name"] for index in inspector.get_indexes("usage")}
-        if op.f("ix_usage_tenant_id") not in existing_indexes:
-            op.create_index(
-                op.f("ix_usage_tenant_id"), "usage", ["tenant_id"], unique=False
-            )
-
-    if dialect == "postgresql":
-        op.execute(
-            """
-    DO $$
-    BEGIN
-        IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'appt_status_enum') THEN
-            CREATE TYPE appt_status_enum AS ENUM ('pending', 'confirmed', 'cancelled');
-        END IF;
-    EXCEPTION
-        WHEN duplicate_object THEN NULL;
-    END
-    $$;
-            """
-        )
-
-    if not inspector.has_table("appointments"):
-        op.create_table(
-            "appointments",
-            sa.Column("id", sa.Integer(), primary_key=True, autoincrement=True),
-            sa.Column("tenant_id", sa.String(), nullable=False, index=True),
-            sa.Column("customer_phone", sa.String(), nullable=False),
-            sa.Column("customer_email", sa.String(), nullable=True),
-            sa.Column("starts_at", sa.TIMESTAMP(timezone=True), nullable=False),
-            sa.Column(
-                "status",
-                sa.Enum("pending", "confirmed", "cancelled", name="appt_status_enum"),
-                nullable=False,
-                server_default="pending",
-            ),
-            sa.Column("google_event_id", sa.String(), nullable=True),
-            sa.Column(
-                "reminded",
-                sa.Boolean(),
-                nullable=False,
-                server_default=sa.text("false"),
-            ),
-            sa.Column(
-                "created_ts",
-                sa.TIMESTAMP(timezone=True),
-                nullable=False,
-                server_default=sa.func.now(),
-            ),
-            sa.ForeignKeyConstraint(["tenant_id"], ["tenants.id"], ondelete="CASCADE"),
-        )
-
-    if dialect == "postgresql":
-        op.execute(
-            """
-    UPDATE public.usage
-       SET msg_ts = to_timestamp(msg_ts::bigint)
-     WHERE pg_typeof(msg_ts) <> 'timestamp with time zone';
-            """
-        )
-
-        op.execute(
-            """
-    ALTER TABLE public.faqs DROP CONSTRAINT IF EXISTS faqs_tenant_id_fkey;
-    ALTER TABLE public.faqs
-      ADD CONSTRAINT faqs_tenant_id_fkey
-      FOREIGN KEY (tenant_id) REFERENCES public.tenants(id) ON DELETE CASCADE;
-
-    ALTER TABLE public.messages DROP CONSTRAINT IF EXISTS messages_tenant_id_fkey;
-    ALTER TABLE public.messages
-      ADD CONSTRAINT messages_tenant_id_fkey
-      FOREIGN KEY (tenant_id) REFERENCES public.tenants(id) ON DELETE CASCADE;
-
-    ALTER TABLE public.usage DROP CONSTRAINT IF EXISTS usage_tenant_id_fkey;
-    ALTER TABLE public.usage
-      ADD CONSTRAINT usage_tenant_id_fkey
-      FOREIGN KEY (tenant_id) REFERENCES public.tenants(id) ON DELETE CASCADE;
-            """
-        )
+    op.create_table(
+        "appointments",
+        sa.Column("id", sa.BigInteger(), autoincrement=True, nullable=False),
+        sa.Column("tenant_id", sa.String(length=255), nullable=False),
+        sa.Column("customer_phone", sa.String(length=255), nullable=False),
+        sa.Column("customer_email", sa.String(length=255), nullable=True),
+        sa.Column("starts_at", sa.TIMESTAMP(timezone=True), nullable=False),
+        sa.Column("status", appt_status_enum, nullable=False, server_default="pending"),
+        sa.Column("google_event_id", sa.String(length=255), nullable=True),
+        sa.Column(
+            "reminded",
+            sa.Boolean(),
+            nullable=False,
+            server_default=sa.text("false"),
+        ),
+        sa.Column(
+            "created_ts",
+            sa.TIMESTAMP(timezone=True),
+            nullable=False,
+            server_default=sa.text("now()"),
+        ),
+        sa.ForeignKeyConstraint(
+            ["tenant_id"],
+            [f"{SCHEMA}.tenants.id"],
+            ondelete="CASCADE",
+        ),
+        sa.PrimaryKeyConstraint("id"),
+        schema=SCHEMA,
+    )
+    op.create_index(
+        op.f("ix_appointments_tenant_id"),
+        "appointments",
+        ["tenant_id"],
+        unique=False,
+        schema=SCHEMA,
+    )
 
 
-def downgrade():
+def downgrade() -> None:
     conn = op.get_bind()
     dialect = conn.dialect.name
-    inspector = sa.inspect(conn)
 
-    if inspector.has_table("usage"):
-        existing_columns = {column["name"] for column in inspector.get_columns("usage")}
-        for column_name in (
-            "model",
-            "prompt_tokens",
-            "completion_tokens",
-            "total_tokens",
-        ):
-            if column_name in existing_columns:
-                op.drop_column("usage", column_name)
+    op.drop_index(
+        op.f("ix_appointments_tenant_id"),
+        table_name="appointments",
+        schema=SCHEMA,
+    )
+    op.drop_table("appointments", schema=SCHEMA)
 
-    op.drop_table("appointments")
+    op.drop_index("ix_usage_tenant_id_id", table_name="usage", schema=SCHEMA)
+    op.drop_index("ix_usage_tenant_id_msg_ts", table_name="usage", schema=SCHEMA)
+    op.drop_index(op.f("ix_usage_tenant_id"), table_name="usage", schema=SCHEMA)
+    op.drop_table("usage", schema=SCHEMA)
+
+    op.drop_index(op.f("ix_faqs_tenant_id"), table_name="faqs", schema=SCHEMA)
+    op.drop_table("faqs", schema=SCHEMA)
+
+    op.drop_index(op.f("ix_messages_tenant_id"), table_name="messages", schema=SCHEMA)
+    op.drop_table("messages", schema=SCHEMA)
+
+    op.drop_index(op.f("ix_tenants_phone_id"), table_name="tenants", schema=SCHEMA)
+    op.drop_index(op.f("ix_tenants_id"), table_name="tenants", schema=SCHEMA)
+    op.drop_table("tenants", schema=SCHEMA)
+
     if dialect == "postgresql":
-        op.execute("DROP TYPE IF EXISTS appt_status_enum")
-
-    op.drop_table("usage")
-    op.drop_table("faqs")
-    op.drop_table("messages")
-    op.drop_index(op.f("ix_tenants_phone_id"), table_name="tenants")
-    op.drop_index(op.f("ix_tenants_id"), table_name="tenants")
-    op.drop_table("tenants")
-
-    if dialect == "postgresql":
-        op.execute("DROP TYPE IF EXISTS direction_enum")
-        op.execute("DROP TYPE IF EXISTS role_enum")
-        op.execute("DROP EXTENSION IF EXISTS vector")
+        op.execute(sa.text(f"DROP TYPE IF EXISTS {SCHEMA}.appt_status_enum"))
+        op.execute(sa.text(f"DROP TYPE IF EXISTS {SCHEMA}.direction_enum"))
+        op.execute(sa.text(f"DROP TYPE IF EXISTS {SCHEMA}.role_enum"))
+        op.execute(sa.text("DROP EXTENSION IF EXISTS vector"))

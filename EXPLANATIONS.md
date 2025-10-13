@@ -82,3 +82,7 @@ yp1pcw-codex/fix-crash-related-to-pydantic-import
 - Synced `Usage` ORM + admin response schema with the widened types/defaults to guarantee serialisation without 500s once the migration runs.
 - Introduced `api/scripts/smoke_runner.sh` to hit health, tenant CRUD, and usage endpoints against a remote deployment with a PASS/FAIL summary for quick regression checks.
 
+## Nov 13 2025 · Canonical + repair migrations
+- Rebuilt `001` as a deterministic, schema-qualified bootstrap: creates enums, pgvector, and every table/index in `public` with the production `usage` shape from the outset.
+- Reworked `002` into an idempotent fixer that adds/widens `usage` columns, cascades FK/index repairs, and leaves the canonical layout untouched on downgrades.
+- Locked Alembic's runtime to the `public` schema (search_path + version table) to keep revisions and repair logic deterministic across environments.
