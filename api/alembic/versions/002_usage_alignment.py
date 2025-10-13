@@ -209,7 +209,8 @@ def upgrade() -> None:
 
         if "model" in columns:
             model_type = columns["model"]["type"]
-            if not isinstance(model_type, sa.String) or getattr(model_type, "length", 0) < 255:
+            model_length = getattr(model_type, "length", None)
+            if not isinstance(model_type, sa.String) or model_length is None or model_length < 255:
                 op.alter_column(
                     "usage",
                     "model",
@@ -220,7 +221,8 @@ def upgrade() -> None:
 
         if "trace_id" in columns:
             trace_type = columns["trace_id"]["type"]
-            if not isinstance(trace_type, sa.String) or getattr(trace_type, "length", 0) < 255:
+            trace_length = getattr(trace_type, "length", None)
+            if not isinstance(trace_type, sa.String) or trace_length is None or trace_length < 255:
                 op.alter_column(
                     "usage",
                     "trace_id",
