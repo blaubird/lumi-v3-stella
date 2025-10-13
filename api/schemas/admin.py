@@ -104,7 +104,11 @@ class UsageResponse(BaseModel):
     prompt_tokens: int = Field(default=0, ge=0)
     completion_tokens: int = Field(default=0, ge=0)
     total_tokens: int = Field(default=0, ge=0)
-    trace_id: Optional[str] = None
+    trace_id: Optional[str] = Field(
+        default=None,
+        description="Correlation identifier emitted for the AI request trace.",
+        examples=["d4a7cfd2-9a57-4e5f-9f2e-3f7af93f8c19"],
+    )
 
     model_config = ConfigDict(from_attributes=True)
 

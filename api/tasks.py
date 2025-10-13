@@ -1,5 +1,6 @@
 import os
 from typing import List, cast, Optional
+from uuid import uuid4
 from openai import AsyncOpenAI
 from openai.types.chat import ChatCompletionMessageParam
 from database import SessionLocal
@@ -156,6 +157,7 @@ async def process_ai_reply(tenant_id: str, wa_msg_id: str, user_text: str) -> No
                 tokens=token_count,
                 total_tokens=token_count,
                 completion_tokens=token_count,
+                trace_id=str(uuid4()),
             )
             db.add(usage_record)
             db.commit()
