@@ -18,6 +18,7 @@ branch_labels = None
 depends_on = None
 
 SCHEMA = "public"
+TRACE_ID_MARKER = "added_by_002_usage_alignment"
 
 USAGE_COLUMNS: Dict[str, sa.Column] = {
     "id": sa.Column(
@@ -51,7 +52,7 @@ USAGE_COLUMNS: Dict[str, sa.Column] = {
         nullable=False,
         server_default=sa.text("0"),
     ),
-    "trace_id": sa.Column("trace_id", sa.String(length=255), nullable=True),
+    "trace_id": sa.Column("trace_id", sa.VARCHAR(length=255), nullable=True),
 }
 
 USAGE_INDEXES: Tuple[Tuple[str, Tuple[str, ...]], ...] = (
@@ -67,6 +68,26 @@ def _refresh_inspector(connection: sa.engine.Connection) -> sa.Inspector:
 
 def _qualified(table: str) -> str:
     return f"{SCHEMA}.{table}"
+
+
+def _set_column_comment(
+    connection: sa.engine.Connection,
+    schema: str,
+    table: str,
+    column: str,
+    comment: str,
+) -> None:
+    if connection.dialect.name != "postgresql":
+        return
+
+    qualified_table = f'"{schema}"."{table}"'
+    op.execute(
+        sa.text(
+            "COMMENT ON COLUMN "
+            f"{qualified_table}.\"{column}\" "
+            "IS :comment"
+        ).bindparams(comment=comment)
+    )
 
 
 def upgrade() -> None:
@@ -101,7 +122,10 @@ def upgrade() -> None:
             for column in inspector.get_columns("usage", schema=SCHEMA)
         }
 
+        trace_id_added = False
+
         def _add_column_if_missing(name: str) -> None:
+            nonlocal trace_id_added
             if name not in columns:
                 op.add_column("usage", USAGE_COLUMNS[name].copy(), schema=SCHEMA)
                 columns[name] = {
@@ -109,9 +133,20 @@ def upgrade() -> None:
                     "type": USAGE_COLUMNS[name].type,
                     "nullable": USAGE_COLUMNS[name].nullable,
                 }
+                if name == "trace_id":
+                    trace_id_added = True
 
         for column_name in ("model", "direction", "msg_ts", "trace_id"):
             _add_column_if_missing(column_name)
+
+        if trace_id_added:
+            _set_column_comment(
+                connection,
+                SCHEMA,
+                "usage",
+                "trace_id",
+                TRACE_ID_MARKER,
+            )
 
         for numeric_name in ("prompt_tokens", "completion_tokens", "total_tokens"):
             _add_column_if_missing(numeric_name)
@@ -220,12 +255,17 @@ def upgrade() -> None:
 
         if "trace_id" in columns:
             trace_type = columns["trace_id"]["type"]
-            if not isinstance(trace_type, sa.String) or getattr(trace_type, "length", 0) < 255:
+            trace_length = (
+                getattr(trace_type, "length", None)
+                if isinstance(trace_type, sa.String)
+                else None
+            )
+            if not isinstance(trace_type, sa.String) or trace_length is None or trace_length < 255:
                 op.alter_column(
                     "usage",
                     "trace_id",
                     existing_type=trace_type,
-                    type_=sa.String(length=255),
+                    type_=sa.VARCHAR(length=255),
                     schema=SCHEMA,
                 )
 
@@ -327,4 +367,38 @@ def downgrade() -> None:
         if index_name in existing_indexes:
             op.drop_index(index_name, table_name="usage", schema=SCHEMA)
 
-    # Leave columns intact to avoid data loss when rolling back revisions.
+    columns = {
+        column["name"]: column
+        for column in inspector.get_columns("usage", schema=SCHEMA)
+    }
+
+    if "trace_id" not in columns:
+        return
+
+    if connection.dialect.name != "postgresql":
+        return
+
+    comment_query = sa.text(
+        """
+        SELECT pgd.description
+        FROM pg_catalog.pg_description pgd
+        JOIN pg_catalog.pg_class c ON pgd.objoid = c.oid
+        JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+        JOIN information_schema.columns cols
+          ON cols.table_schema = n.nspname
+         AND cols.table_name = c.relname
+         AND cols.ordinal_position = pgd.objsubid
+        WHERE n.nspname = :schema
+          AND c.relname = :table
+          AND cols.column_name = :column
+        LIMIT 1
+        """
+    )
+
+    comment_result = connection.execute(
+        comment_query,
+        {"schema": SCHEMA, "table": "usage", "column": "trace_id"},
+    ).scalar()
+
+    if comment_result == TRACE_ID_MARKER:
+        op.drop_column("usage", "trace_id", schema=SCHEMA)
