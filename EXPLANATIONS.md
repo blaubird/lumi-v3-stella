@@ -91,3 +91,8 @@ yp1pcw-codex/fix-crash-related-to-pydantic-import
 - Folded the standalone trace-ID migration into `002_usage_alignment`, deleting revision `003` while keeping upgrade paths idempotent for partially patched databases.
 - Hardened the repair migration: guards every column add/widen (including `trace_id`), enforces token defaults with NULL backfill, preserves enum directions, and recreates the tenant usage indexes only when absent.
 - Synced the ORM defaults with `server_default=text("0")` and refreshed docs/notes so operators just run `alembic upgrade head` to land the consolidated fix.
+
+## Nov 22 2025 · Usage column widening guard
+- Treated `None` inspector lengths as needing widening so VARCHAR/Text columns created without explicit sizes upgrade cleanly.
+- Avoided TypeErrors in `002_usage_alignment` by capturing the reported length once and guarding for `None` before comparing with the target width.
+- Confirmed no behavioural change for already-wide columns because the guard still short-circuits when the inspector reports length ≥ 255.
