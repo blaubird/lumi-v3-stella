@@ -1,6 +1,7 @@
 import os
 import json
 from typing import Dict, Any, cast
+from uuid import uuid4
 from fastapi import APIRouter, Depends, Request, Query, Response
 from sqlalchemy.orm import Session
 from redis.asyncio import Redis
@@ -154,6 +155,8 @@ async def process_message(
             logger.info("Message already processed", extra={"message_id": message_id})
             return
 
+        trace_id = str(uuid4())
+
         # Save user message
         user_message = Message(
             tenant_id=tenant["id"],
@@ -174,6 +177,7 @@ async def process_message(
             prompt_tokens=0,
             completion_tokens=0,
             total_tokens=0,
+            trace_id=trace_id,
         )
         db.add(usage_record)
         db.commit()
@@ -242,6 +246,7 @@ async def process_message(
                     prompt_tokens=0,
                     total_tokens=token_count,
                     completion_tokens=token_count,
+                    trace_id=trace_id,
                 )
                 db.add(outbound_usage)
                 db.commit()
@@ -288,6 +293,7 @@ async def process_message(
                 prompt_tokens=0,
                 total_tokens=token_count,
                 completion_tokens=token_count,
+                trace_id=trace_id,
             )
             db.add(outbound_usage)
             db.commit()
@@ -325,6 +331,7 @@ async def process_message(
                 lang=lang,
                 db=db,
                 redis=redis,
+                trace_id=trace_id,
             )
 
             answer = response["text"]

@@ -86,3 +86,8 @@ yp1pcw-codex/fix-crash-related-to-pydantic-import
 - Rebuilt `001` as a deterministic, schema-qualified bootstrap: creates enums, pgvector, and every table/index in `public` with the production `usage` shape from the outset.
 - Reworked `002` into an idempotent fixer that adds/widens `usage` columns, cascades FK/index repairs, and leaves the canonical layout untouched on downgrades.
 - Locked Alembic's runtime to the `public` schema (search_path + version table) to keep revisions and repair logic deterministic across environments.
+
+## Nov 18 2025 · Usage trace correlation
+- Added Alembic revision `003_add_trace_id_to_usage` to append `public.usage.trace_id` only when missing, keeping reruns safe and downgrades confined to that column.
+- Updated webhook, task, and RAG persistence paths to mint UUIDv4 trace IDs whenever callers omit them so fresh rows never store `NULL`.
+- Documented the operational impact and marked the admin usage schema so `trace_id` surfaces as an optional OpenAPI field for legacy rows.

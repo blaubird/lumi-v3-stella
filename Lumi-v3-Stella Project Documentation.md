@@ -104,6 +104,12 @@ The `api/` directory is the heart of the `lumi-v3-stella` application, containin
 
 `lumi-v3-stella` is designed for cloud deployment, with a strong emphasis on leveraging Platform as a Service (PaaS) providers like Railway for simplified hosting and management.
 
+### Usage trace ID migration (`003_add_trace_id_to_usage`)
+
+- The Alembic repair migration checks for `public.usage.trace_id` and only adds the nullable column if it is absent, making it safe to run repeatedly.
+- Older rows will keep `NULL` in `trace_id`; API serializers treat the field as optional and the AI stack now backfills a UUIDv4 for every new usage record.
+- No other schema elements are touched; downgrading the revision drops only the column created by this migration.
+
 ### Railway Hosting
 
 Railway is a modern PaaS that allows developers to deploy applications quickly without managing underlying infrastructure. For `lumi-v3-stella`, Railway provides:

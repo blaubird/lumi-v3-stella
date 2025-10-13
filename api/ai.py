@@ -8,6 +8,7 @@ import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, List, Optional, Sequence, cast
+from uuid import uuid4
 
 import tiktoken
 from openai import (
@@ -358,6 +359,7 @@ def _persist_usage(
     total_tokens: int,
     trace_id: str | None,
 ) -> None:
+    resolved_trace_id = trace_id or str(uuid4())
     record = Usage(
         tenant_id=tenant_id,
         direction="outbound",
@@ -367,7 +369,7 @@ def _persist_usage(
         prompt_tokens=prompt_tokens,
         completion_tokens=completion_tokens,
         total_tokens=total_tokens,
-        trace_id=trace_id,
+        trace_id=resolved_trace_id,
     )
     db.add(record)
     db.commit()
