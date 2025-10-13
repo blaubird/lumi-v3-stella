@@ -9,6 +9,7 @@ from sqlalchemy import (
     DateTime,
     Boolean,
     BigInteger,
+    text,
 )
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -92,9 +93,9 @@ class Usage(Base):
     tokens = Column(Integer, nullable=True)
     msg_ts = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     model = Column(String(255), nullable=True)
-    prompt_tokens = Column(Integer, nullable=False, default=0, server_default="0")
-    completion_tokens = Column(Integer, nullable=False, default=0, server_default="0")
-    total_tokens = Column(Integer, nullable=False, default=0, server_default="0")
+    prompt_tokens = Column(Integer, nullable=False, default=0, server_default=text("0"))
+    completion_tokens = Column(Integer, nullable=False, default=0, server_default=text("0"))
+    total_tokens = Column(Integer, nullable=False, default=0, server_default=text("0"))
     trace_id = Column(String(255), nullable=True)
 
     # Relationships
