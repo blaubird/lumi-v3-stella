@@ -91,3 +91,11 @@ yp1pcw-codex/fix-crash-related-to-pydantic-import
 - Folded the standalone trace-ID migration into `002_usage_alignment`, deleting revision `003` while keeping upgrade paths idempotent for partially patched databases.
 - Hardened the repair migration: guards every column add/widen (including `trace_id`), enforces token defaults with NULL backfill, preserves enum directions, and recreates the tenant usage indexes only when absent.
 - Synced the ORM defaults with `server_default=text("0")` and refreshed docs/notes so operators just run `alembic upgrade head` to land the consolidated fix.
+
+## Nov 24 2025 · Trace-ID column marker
+- Added an inspector guard so the consolidated repair migration creates `public.usage.trace_id` when missing and annotates it with a reversible marker.
+- Downgrade now inspects that marker before dropping the column, avoiding accidental deletion when environments already had `trace_id` pre-migration.
+
+## Nov 25 2025 · Trace-ID VARCHAR enforcement
+- Ensured the repair migration always materialises `trace_id` as `VARCHAR(255)` by widening existing `TEXT` columns and adding the field with the explicit type when missing.
+- Guarded the widening logic against `NULL` length metadata so idempotent reruns don't raise when inspecting legacy column definitions.
