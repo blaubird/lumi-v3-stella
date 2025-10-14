@@ -105,3 +105,8 @@ yp1pcw-codex/fix-crash-related-to-pydantic-import
 - Introduced read-through cache helpers for tenant config/FAQs with namespaced keys, JSON storage, and hashed-key debug logging gated by `REDIS_METRICS`.
 - Extended FastAPI lifespan to publish wrapper state, surface latency on `/healthz`, and added smoke script + README guidance for Redis deployments.
 - Hooked SQLAlchemy sessions to enqueue namespace invalidation (SCAN + UNLINK) after commits and reused the helper in admin flows.
+
+## Dec 12 2025 · Async RAG pipeline hardening
+- Rebuilt `get_rag_response` to call a dedicated pgvector retrieval helper, enforce token budgets with `tiktoken`, and stream retries via `tenacity` with telemetry + Redis trace breadcrumbs.
+- Added `api/retrieval.py` for embedding generation + cosine search, wired routers to pass Redis handles, and persisted usage records on both success and failure paths.
+- Delivered an async CLI to backfill FAQ embeddings in batches so operations can heal legacy data purely through environment configuration.

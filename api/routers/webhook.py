@@ -1,6 +1,6 @@
 import os
 import json
-from typing import Dict, Any, cast
+from typing import Any, Dict, Optional, cast
 from uuid import uuid4
 from fastapi import APIRouter, Depends, Request, Query, Response
 from sqlalchemy.orm import Session
@@ -100,9 +100,10 @@ async def webhook_handler(request: Request, db: Session = Depends(get_db)):
                     continue
 
                 # Process messages
+                redis_client = getattr(request.app.state, "redis", None)
                 for message in value.get("messages", []):
                     if message.get("type") == "text":
-                        await process_message(db, tenant, message)
+                        await process_message(db, tenant, message, redis_client)
     except Exception as e:
         # Log the error but still return success
         logger.error(
@@ -114,7 +115,12 @@ async def webhook_handler(request: Request, db: Session = Depends(get_db)):
     return {"status": "success"}
 
 
-async def process_message(db: Session, tenant: Dict[str, Any], message: Dict[str, Any]):
+async def process_message(
+    db: Session,
+    tenant: Dict[str, Any],
+    message: Dict[str, Any],
+    redis_client: Optional[Any],
+):
     """
     Process a message from WhatsApp
     """
@@ -323,6 +329,7 @@ async def process_message(db: Session, tenant: Dict[str, Any], message: Dict[str
                 user_text=text,
                 lang=lang,
                 db=db,
+                redis=redis_client,
                 trace_id=trace_id,
             )
 
