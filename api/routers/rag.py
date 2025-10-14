@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Path, Request
+from fastapi import APIRouter, Depends, HTTPException, Path
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from typing import Annotated, Any, Optional, cast
@@ -25,7 +25,6 @@ router = APIRouter(prefix="/admin", tags=["RAG"])
 async def query_rag(
     tenant_id: Annotated[str, Path(..., examples=TENANT_ID_OPENAPI_EXAMPLES)],
     query: QueryRequest,
-    request: Request,
     db: Session = Depends(get_db),
 ):
     """
@@ -127,13 +126,11 @@ async def query_rag(
             )
 
             # Use the RAG implementation to get a response if no exact match
-            redis = cast(Any, request.app.state.redis)
             response = await get_rag_response(
                 tenant_id=tenant_key,
                 user_text=query.query,
                 lang=query.lang or "en",
                 db=db,
-                redis=redis,
             )
 
         logger.info("RAG query processed successfully", extra={"tenant_id": tenant_key})

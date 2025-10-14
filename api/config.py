@@ -11,7 +11,15 @@ class Settings(BaseSettings):
 
     DATABASE_URL: str
 
-    REDIS_URL: str
+    REDIS_URL: str | None = None
+    REDIS_DB: int | None = None
+    REDIS_PREFIX: str = "lumi"
+    REDIS_CONNECT_TIMEOUT_MS: int = 500
+    REDIS_HEALTHCHECK_SECONDS: int = 30
+    REDIS_SCAN_COUNT: int = 100
+    CACHE_TTL_CONFIG_SEC: int = 60
+    CACHE_TTL_FAQS_SEC: int = 300
+    REDIS_METRICS: bool = False
 
     OPENAI_API_KEY: str
     OPENAI_MODEL: str = "gpt-4o-mini"

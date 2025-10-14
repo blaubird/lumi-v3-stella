@@ -4,10 +4,9 @@ from typing import Dict, Any, cast
 from uuid import uuid4
 from fastapi import APIRouter, Depends, Request, Query, Response
 from sqlalchemy.orm import Session
-from redis.asyncio import Redis
 from database import SessionLocal
 from models import Tenant, Message, Usage, Appointment
-from cache import get_cached_faqs, get_cached_tenant
+from services.tenant_config import get_tenant_config, get_tenant_faqs
 import re
 from ai import get_rag_response
 from services.whatsapp import send_whatsapp_message
@@ -93,9 +92,7 @@ async def webhook_handler(request: Request, db: Session = Depends(get_db)):
                     )
                     continue
 
-                tenant = await get_cached_tenant(
-                    request.app.state.redis, db, cast(str, tenant_db.id)
-                )
+                tenant = await get_tenant_config(db, cast(str, tenant_db.id))
                 if not tenant:
                     logger.warning(
                         "Tenant config not found", extra={"tenant_id": tenant_db.id}
@@ -105,9 +102,7 @@ async def webhook_handler(request: Request, db: Session = Depends(get_db)):
                 # Process messages
                 for message in value.get("messages", []):
                     if message.get("type") == "text":
-                        await process_message(
-                            request.app.state.redis, db, tenant, message
-                        )
+                        await process_message(db, tenant, message)
     except Exception as e:
         # Log the error but still return success
         logger.error(
@@ -119,9 +114,7 @@ async def webhook_handler(request: Request, db: Session = Depends(get_db)):
     return {"status": "success"}
 
 
-async def process_message(
-    redis: Redis, db: Session, tenant: Dict[str, Any], message: Dict[str, Any]
-):
+async def process_message(db: Session, tenant: Dict[str, Any], message: Dict[str, Any]):
     """
     Process a message from WhatsApp
     """
@@ -262,7 +255,7 @@ async def process_message(
                 return
 
         # Check for exact FAQ match before using RAG
-        faqs = await get_cached_faqs(redis, db, cast(str, tenant["id"]))
+        faqs = await get_tenant_faqs(db, cast(str, tenant["id"]))
         faq = next((f for f in faqs if f["question"].lower() == text.lower()), None)
 
         if faq:
@@ -330,7 +323,6 @@ async def process_message(
                 user_text=text,
                 lang=lang,
                 db=db,
-                redis=redis,
                 trace_id=trace_id,
             )
 

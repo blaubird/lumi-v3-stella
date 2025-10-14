@@ -27,14 +27,13 @@ from schemas.admin import (
 )
 from deps import verify_admin_token
 from ai import generate_embedding
-from redis.asyncio import Redis
-from redis.exceptions import RedisError
 from logging_utils import get_logger
 from utils.tenant_ids import (
     TENANT_ID_OPENAPI_EXAMPLES,
     TenantIdNormalizationError,
     normalize_tenant_id,
 )
+from services.cache_invalidate import invalidate_tenant_namespace
 
 # Initialize logger
 logger = get_logger(__name__)
@@ -104,35 +103,12 @@ def _delete_tenant_records(db: Session, tenant_ids: Sequence[str]) -> int:
     return total_rows
 
 
-async def _invalidate_tenant_cache(
-    redis: Redis | None, tenant_ids: Sequence[str]
-) -> None:
+async def _invalidate_tenant_cache(tenant_ids: Sequence[str]) -> None:
     if not tenant_ids:
         return
 
-    if redis is None:
-        logger.warning(
-            "Redis unavailable; skipping tenant cache invalidation",
-            extra={"tenant_ids": tenant_ids},
-        )
-        return
-
-    try:
-        for tenant_id in tenant_ids:
-            pattern = f"tenant:{tenant_id}:*"
-            batch: list[str] = []
-            async for key in redis.scan_iter(match=pattern, count=100):
-                batch.append(key)
-                if len(batch) >= 100:
-                    await redis.unlink(*batch)
-                    batch.clear()
-            if batch:
-                await redis.unlink(*batch)
-    except RedisError as exc:
-        logger.warning(
-            "Failed to invalidate tenant cache",
-            extra={"tenant_ids": tenant_ids, "error": str(exc)},
-        )
+    for tenant_id in tenant_ids:
+        await invalidate_tenant_namespace(tenant_id)
 
 
 @router.get(
@@ -376,9 +352,7 @@ async def hard_delete_tenant(
         )
         raise HTTPException(status_code=500, detail="Failed to delete tenant(s).")
 
-    await _invalidate_tenant_cache(
-        cast(Redis | None, getattr(request.app.state, "redis", None)), tenant_ids
-    )
+    await _invalidate_tenant_cache(tenant_ids)
 
     logger.info(
         "Tenants hard deleted",

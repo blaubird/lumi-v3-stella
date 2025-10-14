@@ -99,3 +99,9 @@ yp1pcw-codex/fix-crash-related-to-pydantic-import
 ## Nov 25 2025 · Trace-ID VARCHAR enforcement
 - Ensured the repair migration always materialises `trace_id` as `VARCHAR(255)` by widening existing `TEXT` columns and adding the field with the explicit type when missing.
 - Guarded the widening logic against `NULL` length metadata so idempotent reruns don't raise when inspecting legacy column definitions.
+
+## Dec 5 2025 · Redis cache & invalidation overhaul
+- Wrapped Redis access in `redis_client.RedisWrapper` with lifespan-aware init/close, latency tracking, and quiet degradation when misconfigured.
+- Introduced read-through cache helpers for tenant config/FAQs with namespaced keys, JSON storage, and hashed-key debug logging gated by `REDIS_METRICS`.
+- Extended FastAPI lifespan to publish wrapper state, surface latency on `/healthz`, and added smoke script + README guidance for Redis deployments.
+- Hooked SQLAlchemy sessions to enqueue namespace invalidation (SCAN + UNLINK) after commits and reused the helper in admin flows.

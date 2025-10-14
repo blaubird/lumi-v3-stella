@@ -9,11 +9,12 @@ from monitoring import setup_metrics, add_health_check_endpoint
 from logging_utils import configure_basic_logging, get_logger, request_context
 from alembic.config import Config as AlembicConfig
 from alembic import command
-from redis.asyncio import from_url as redis_from_url
 from contextlib import asynccontextmanager
 from fastapi.middleware.cors import CORSMiddleware
 from config import settings  # Import settings
 from schemas.common import ErrorResponse  # Import ErrorResponse schema
+from redis_client import RedisWrapper, redis_wrapper
+import db_hooks  # noqa: F401
 
 configure_basic_logging()
 logger = get_logger(__name__)
@@ -37,19 +38,9 @@ async def lifespan(app: FastAPI):
     logger.info("Metrics setup complete")
 
     logger.info("Initializing Redis")
-    app.state.redis = redis_from_url(
-        settings.REDIS_URL,
-        decode_responses=True,
-        encoding="utf-8",
-        max_connections=32,
-        socket_connect_timeout=5,
-        socket_timeout=5,
-        health_check_interval=30,
-    )
-    try:
-        await app.state.redis.ping()
-    except Exception as e:
-        logger.warning("Redis ping failed", extra={"error": str(e)}, exc_info=True)
+    await redis_wrapper.init()
+    app.state.redis_wrapper = redis_wrapper
+    app.state.redis = redis_wrapper.client
 
     # Add comprehensive health check endpoint
     add_health_check_endpoint(app)
@@ -60,7 +51,8 @@ async def lifespan(app: FastAPI):
     try:
         yield
     finally:
-        await app.state.redis.aclose()
+        await redis_wrapper.close()
+        app.state.redis = None
 
     # Optional shutdown logs could be added here
 
@@ -110,14 +102,17 @@ log = get_logger("api")
 
 @app.get("/healthz", include_in_schema=False)
 async def healthz(request: Request):
-    redis_ok = True
-    try:
-        await request.app.state.redis.ping()
-    except Exception as e:
-        logger.warning("Health check degraded", extra={"error": str(e)})
-        redis_ok = False
+    wrapper = cast(
+        RedisWrapper,
+        getattr(request.app.state, "redis_wrapper", redis_wrapper),
+    )
+    redis_ok = await wrapper.ping()
     status_str = "ok" if redis_ok else "degraded"
-    return {"status": status_str, "redis": redis_ok}
+    return {
+        "status": status_str,
+        "redis": redis_ok,
+        "redis_latency_ms": wrapper.last_latency_ms,
+    }
 
 
 @app.get("/docs", response_class=HTMLResponse, include_in_schema=False)
