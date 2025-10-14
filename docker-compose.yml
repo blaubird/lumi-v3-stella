@@ -1,13 +1,16 @@
 version: '3'
 services:
-  app:
-    build: .
+  api:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    command: uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}
     ports:
-      - "${PORT}:${PORT}"
+      - "${PORT:-8000}:${PORT:-8000}"
     volumes:
       - ./api:/app/api
     environment:
-      - PORT=${PORT}
+      - PORT=${PORT:-8000}
       - DATABASE_URL=${DATABASE_URL}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - VERIFY_TOKEN=${VERIFY_TOKEN}

@@ -20,3 +20,10 @@ Optional knobs:
 - `REDIS_METRICS`: enable detailed cache hit/miss logging.
 
 Use `scripts/smoke_redis.sh http://localhost:8000` to verify `/healthz` reports Redis as healthy after deployment.
+
+### 🐳 Local Docker run  
+```bash
+docker compose up --build api       # first build caches deps layer  
+docker compose up api               # subsequent runs are fast
+```  
+The multi-stage Dockerfile installs Python deps once (layer cache) and copies source separately, so code-only edits rebuild in seconds.
