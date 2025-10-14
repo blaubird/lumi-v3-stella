@@ -30,6 +30,11 @@ class Settings(BaseSettings):
     AI_ENABLE: bool | None = None
     OPENAI_BASE_URL: str | None = None
 
+    RAG_TOP_K: int = 6
+    RAG_SIMILARITY_THRESHOLD: float = 0.75
+    RAG_CONTEXT_TOKEN_BUDGET: int = 1200
+    RAG_MAX_CHUNK_TOKENS: int = 400
+
     VERIFY_TOKEN: str
     WH_TOKEN: str
     WH_PHONE_ID: str

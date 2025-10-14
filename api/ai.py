@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import asyncio
-import math
+import json
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Dict, Iterable, List, Optional, Sequence, cast
+from typing import Any, Dict, Iterable, List, Optional, Sequence
 from uuid import uuid4
 
 import tiktoken
@@ -19,8 +19,15 @@ from openai import (
     RateLimitError,
 )
 from openai.types.chat import ChatCompletionMessageParam
-from sqlalchemy import Select, select
 from sqlalchemy.orm import Session
+from tenacity import (
+    AsyncRetrying,
+    RetryCallState,
+    retry_if_exception_type,
+    stop_after_attempt,
+    wait_chain,
+    wait_fixed,
+)
 
 from config import settings
 from logging_utils import get_logger
@@ -29,11 +36,6 @@ from services.tenant_config import get_tenant_config
 
 logger = get_logger(__name__)
 
-_TOP_K = 6
-_SIMILARITY_THRESHOLD = 0.75
-_CONTEXT_TOKEN_BUDGET = 1200
-_MAX_CHUNK_TOKENS = 400
-_BACKOFF_SCHEDULE = (0.5, 1.5, 3.0)
 _SYSTEM_PROMPT_TEMPLATE = (
     "You are Lumi, a concise multilingual assistant for SMB customer support. "
     "Answer strictly based on the provided FAQ context. If the answer is not in "
@@ -44,15 +46,21 @@ _GUARDRAILS_PROMPT = (
     "If the user asks outside business scope or risky content, redirect politely. "
     "Do not invent facts. Prefer short paragraphs and bullet points."
 )
-_RAG_PREFIX_TEMPLATE = (
-    "FAQ context (summaries):\n{summaries}\n"
-    'User question: "{question}"\n'
-    "— Answer in {lang}. If insufficient context, say you don’t know."
-)
 _FALLBACK_LANG_MAP: Dict[str, str] = {
     "fr": "Je ne peux pas répondre pour le moment. Un membre de l’équipe vous contactera bientôt.",
     "en": "I’m unable to answer right now. A teammate will get back to you shortly.",
 }
+
+_BACKOFF_SCHEDULE = wait_chain(
+    wait_fixed(0.5),
+    wait_fixed(1.5),
+    wait_fixed(3.0),
+)
+_RETRYABLE_ERRORS = (
+    RateLimitError,
+    APITimeoutError,
+    APIConnectionError,
+)
 
 _client: AsyncOpenAI | None = None
 _client_lock = asyncio.Lock()
@@ -72,6 +80,20 @@ class FAQChunk:
             "q": _safe_snippet(self.question),
             "a": _safe_snippet(self.answer),
         }
+
+
+class _RetryableAPIError(Exception):
+    """Wrapper to mark retryable API errors for tenacity."""
+
+
+def _context_token_budget() -> int:
+    budget = getattr(settings, "RAG_CONTEXT_TOKEN_BUDGET", 1200)
+    return max(0, int(budget))
+
+
+def _max_chunk_tokens() -> int:
+    value = getattr(settings, "RAG_MAX_CHUNK_TOKENS", 400)
+    return max(1, int(value))
 
 
 def _is_ai_enabled() -> bool:
@@ -107,10 +129,7 @@ def _resolve_language(lang: str) -> str:
 
 def _fallback_text(lang: str) -> str:
     lang_key = _resolve_language(lang)[:2]
-    return _FALLBACK_LANG_MAP.get(
-        lang_key,
-        _FALLBACK_LANG_MAP["en"],
-    )
+    return _FALLBACK_LANG_MAP.get(lang_key, _FALLBACK_LANG_MAP["en"])
 
 
 def _insufficient_context_text(lang: str) -> str:
@@ -133,12 +152,6 @@ def _safe_snippet(text: str, max_length: int = 280) -> str:
     return f"{text[: max_length - 1]}…"
 
 
-def _score_from_distance(distance: float | None) -> float:
-    if distance is None or not math.isfinite(distance):
-        return 0.0
-    return max(0.0, min(1.0, 1.0 - distance))
-
-
 async def generate_embedding(text: str) -> List[float]:
     client = await _get_client()
     start = time.perf_counter()
@@ -158,10 +171,10 @@ async def generate_embedding(text: str) -> List[float]:
 async def backfill_missing_faq_embeddings(
     db: Session, tenant_id: str | None = None
 ) -> int:
-    stmt = select(FAQ).where(FAQ.embedding.is_(None))
+    stmt = db.query(FAQ).filter(FAQ.embedding.is_(None))
     if tenant_id:
-        stmt = stmt.where(FAQ.tenant_id == tenant_id)
-    rows: List[FAQ] = list(db.execute(stmt).scalars())
+        stmt = stmt.filter(FAQ.tenant_id == tenant_id)
+    rows: List[FAQ] = list(stmt)
     if not rows:
         return 0
     client = await _get_client()
@@ -179,38 +192,18 @@ async def backfill_missing_faq_embeddings(
                 extra={"faq_id": faq.id, "tenant_id": faq.tenant_id, "error": str(exc)},
             )
             continue
-        setattr(faq, "embedding", response.data[0].embedding)
+        faq.embedding = response.data[0].embedding
         db.add(faq)
         updated += 1
     db.commit()
     return updated
 
 
-def _similar_faqs_stmt(embedding: Sequence[float], tenant_id: str) -> Select[Any]:
-    return (
-        select(
-            FAQ.id,
-            FAQ.question,
-            FAQ.answer,
-            FAQ.embedding.cosine_distance(list(embedding)).label("distance"),
-        )
-        .where(FAQ.tenant_id == tenant_id)
-        .where(FAQ.embedding.isnot(None))
-        .order_by(FAQ.embedding.cosine_distance(list(embedding)))
-        .limit(_TOP_K)
-    )
-
-
 def _token_encoding(model: str) -> tiktoken.Encoding:
     try:
         return tiktoken.encoding_for_model(model)
     except KeyError:
-        try:
-            return tiktoken.get_encoding("cl100k_base")
-        except Exception as exc:  # pragma: no cover - defensive guard
-            raise RuntimeError(
-                "tiktoken encoding not available; please upgrade tiktoken"
-            ) from exc
+        return tiktoken.get_encoding("cl100k_base")
 
 
 def _truncate_to_token_limit(text: str, limit: int, encoding: tiktoken.Encoding) -> str:
@@ -219,6 +212,25 @@ def _truncate_to_token_limit(text: str, limit: int, encoding: tiktoken.Encoding)
         return text
     truncated = encoding.decode(tokens[:limit])
     return _safe_snippet(truncated, len(truncated))
+
+
+def _format_chunk_summary(
+    index: int, chunk: FAQChunk, encoding: tiktoken.Encoding
+) -> str:
+    half_budget = _max_chunk_tokens() // 2
+    question = _truncate_to_token_limit(chunk.question, half_budget, encoding)
+    answer = _truncate_to_token_limit(chunk.answer, _max_chunk_tokens(), encoding)
+    return f"{index}. Q: {question}\n   A: {answer}"
+
+
+def _trim_summary_to_budget(
+    summary: str, budget: int, encoding: tiktoken.Encoding
+) -> str:
+    tokens = encoding.encode(summary)
+    if len(tokens) <= budget:
+        return summary
+    trimmed = encoding.decode(tokens[:budget])
+    return _safe_snippet(trimmed, len(trimmed))
 
 
 def _pack_context(
@@ -249,26 +261,6 @@ def _pack_context(
     return "\n".join(lines), included
 
 
-def _format_chunk_summary(
-    index: int, chunk: FAQChunk, encoding: tiktoken.Encoding
-) -> str:
-    question = _truncate_to_token_limit(
-        chunk.question, _MAX_CHUNK_TOKENS // 2, encoding
-    )
-    answer = _truncate_to_token_limit(chunk.answer, _MAX_CHUNK_TOKENS, encoding)
-    return f"{index}. Q: {question}\n   A: {answer}"
-
-
-def _trim_summary_to_budget(
-    summary: str, budget: int, encoding: tiktoken.Encoding
-) -> str:
-    tokens = encoding.encode(summary)
-    if len(tokens) <= budget:
-        return summary
-    trimmed = encoding.decode(tokens[:budget])
-    return _safe_snippet(trimmed, len(trimmed))
-
-
 def _message_text(message: ChatCompletionMessageParam) -> str:
     content = message.get("content")
     if isinstance(content, str):
@@ -284,94 +276,10 @@ def _message_text(message: ChatCompletionMessageParam) -> str:
     return ""
 
 
-async def _retrieve_similar_chunks(
-    db: Session, tenant_id: str, query_embedding: Sequence[float]
-) -> List[FAQChunk]:
-    stmt = _similar_faqs_stmt(query_embedding, tenant_id)
-    rows = db.execute(stmt).all()
-    chunks: List[FAQChunk] = []
-    for row in rows:
-        distance = row.distance if hasattr(row, "distance") else row[3]
-        score = _score_from_distance(distance)
-        if score < _SIMILARITY_THRESHOLD:
-            continue
-        faq_id = row.id if hasattr(row, "id") else row[0]
-        question = row.question if hasattr(row, "question") else row[1]
-        answer = row.answer if hasattr(row, "answer") else row[2]
-        chunks.append(
-            FAQChunk(faq_id=faq_id, question=question, answer=answer, score=score)
-        )
-    return chunks
-
-
-async def _call_openai(
-    messages: Sequence[ChatCompletionMessageParam],
-) -> tuple[str, int, int, str]:
-    client = await _get_client()
-    for attempt, delay in enumerate(_BACKOFF_SCHEDULE, start=1):
-        try:
-            response = await client.chat.completions.create(
-                model=settings.OPENAI_MODEL,
-                messages=list(messages),
-                temperature=getattr(settings, "AI_TEMPERATURE", 0.2),
-                max_tokens=settings.AI_MAX_TOKENS_COMPLETION,
-                timeout=getattr(settings, "AI_REQUEST_TIMEOUT_SECONDS", 30.0),
-            )
-        except (RateLimitError, APITimeoutError, APIConnectionError) as exc:
-            logger.warning(
-                "Transient OpenAI error",
-                extra={"attempt": attempt, "error": str(exc)},
-            )
-            if attempt == len(_BACKOFF_SCHEDULE):
-                raise
-            await asyncio.sleep(delay)
-            continue
-        except APIError as exc:
-            status = getattr(exc, "status_code", None)
-            if status and 500 <= status < 600:
-                logger.warning(
-                    "OpenAI server error",
-                    extra={"attempt": attempt, "status": status},
-                )
-                if attempt == len(_BACKOFF_SCHEDULE):
-                    raise
-                await asyncio.sleep(delay)
-                continue
-            raise
-        else:
-            choice = response.choices[0]
-            text = choice.message.content or ""
-            usage = response.usage
-            prompt_tokens = usage.prompt_tokens if usage else 0
-            completion_tokens = usage.completion_tokens if usage else len(text.split())
-            model = response.model
-            return text.strip(), prompt_tokens, completion_tokens, model
-    raise RuntimeError("OpenAI retries exhausted")
-
-
-def _persist_usage(
-    db: Session,
-    tenant_id: str,
-    model: str,
-    prompt_tokens: int,
-    completion_tokens: int,
-    total_tokens: int,
-    trace_id: str | None,
-) -> None:
-    resolved_trace_id = trace_id or str(uuid4())
-    record = Usage(
-        tenant_id=tenant_id,
-        direction="outbound",
-        tokens=total_tokens,
-        msg_ts=datetime.now(timezone.utc),
-        model=model,
-        prompt_tokens=prompt_tokens,
-        completion_tokens=completion_tokens,
-        total_tokens=total_tokens,
-        trace_id=resolved_trace_id,
-    )
-    db.add(record)
-    db.commit()
+def _count_prompt_tokens(
+    messages: Sequence[ChatCompletionMessageParam], encoding: tiktoken.Encoding
+) -> int:
+    return sum(len(encoding.encode(_message_text(message))) for message in messages)
 
 
 def _build_messages(
@@ -382,10 +290,10 @@ def _build_messages(
 ) -> List[ChatCompletionMessageParam]:
     resolved_lang = _resolve_language(lang)
     system_prompt = _SYSTEM_PROMPT_TEMPLATE.format(lang=resolved_lang)
-    rag_prompt = _RAG_PREFIX_TEMPLATE.format(
-        summaries=context,
-        question=question,
-        lang=resolved_lang,
+    rag_prompt = (
+        f"FAQ context:\n{context}\n"
+        f'User question: "{question}"\n'
+        f"— Answer in {resolved_lang}. If insufficient context, say you don’t know."
     )
     messages: List[ChatCompletionMessageParam] = [
         {"role": "system", "content": system_prompt},
@@ -401,31 +309,122 @@ def _build_used_chunks(chunks: Sequence[FAQChunk]) -> List[Dict[str, Any]]:
     return [chunk.to_used_chunk() for chunk in chunks]
 
 
+async def _log_retry(retry_state: RetryCallState) -> None:
+    exc = retry_state.outcome.exception() if retry_state.outcome else None
+    logger.warning(
+        "OpenAI chat attempt failed",
+        extra={
+            "attempt": retry_state.attempt_number,
+            "error": str(exc) if exc else None,
+        },
+    )
+
+
+async def _call_chat_completion(
+    messages: Sequence[ChatCompletionMessageParam],
+) -> tuple[str, int, int, str]:
+    client = await _get_client()
+    retrying = AsyncRetrying(
+        retry=retry_if_exception_type(_RETRYABLE_ERRORS + (_RetryableAPIError,)),
+        wait=_BACKOFF_SCHEDULE,
+        stop=stop_after_attempt(4),
+        before_sleep=_log_retry,
+        reraise=True,
+    )
+    async for attempt in retrying:
+        with attempt:
+            try:
+                response = await client.chat.completions.create(
+                    model=settings.OPENAI_MODEL,
+                    messages=list(messages),
+                    temperature=getattr(settings, "AI_TEMPERATURE", 0.2),
+                    max_tokens=settings.AI_MAX_TOKENS_COMPLETION,
+                    timeout=getattr(settings, "AI_REQUEST_TIMEOUT_SECONDS", 30.0),
+                )
+            except APIError as exc:
+                status = getattr(exc, "status_code", None)
+                if status and 500 <= status < 600:
+                    raise _RetryableAPIError(str(exc)) from exc
+                raise
+            choice = response.choices[0]
+            text = (choice.message.content or "").strip()
+            usage = response.usage
+            prompt_tokens = usage.prompt_tokens if usage else 0
+            completion_tokens = usage.completion_tokens if usage else len(text.split())
+            model = response.model or settings.OPENAI_MODEL
+            return text, prompt_tokens, completion_tokens, model
+    raise RuntimeError("OpenAI retries exhausted")
+
+
+def _persist_usage(
+    db: Session,
+    tenant_id: str,
+    model: str,
+    prompt_tokens: int,
+    completion_tokens: int,
+    total_tokens: int,
+    trace_id: str | None,
+) -> None:
+    record = Usage(
+        tenant_id=tenant_id,
+        direction="outbound",
+        tokens=total_tokens,
+        msg_ts=datetime.now(timezone.utc),
+        model=model,
+        prompt_tokens=prompt_tokens,
+        completion_tokens=completion_tokens,
+        total_tokens=total_tokens,
+        trace_id=trace_id or str(uuid4()),
+    )
+    db.add(record)
+    try:
+        db.commit()
+    except Exception as exc:  # pragma: no cover - commit failures rare
+        db.rollback()
+        logger.error(
+            "Failed to persist usage",
+            extra={"tenant_id": tenant_id, "error": str(exc)},
+        )
+
+
+def _persist_zero_usage(db: Session, tenant_id: str, trace_id: str | None) -> None:
+    _persist_usage(
+        db=db,
+        tenant_id=tenant_id,
+        model="",
+        prompt_tokens=0,
+        completion_tokens=0,
+        total_tokens=0,
+        trace_id=trace_id,
+    )
+
+
 async def get_rag_response(
     tenant_id: str,
     user_text: str,
     lang: str,
     db: Session,
+    redis: Any,
     trace_id: str | None = None,
 ) -> Dict[str, Any]:
     if not _is_ai_enabled():
-        text = _fallback_text(lang)
         return {
-            "text": text,
+            "text": _fallback_text(lang),
             "prompt_tokens": 0,
             "completion_tokens": 0,
             "total_tokens": 0,
-            "model": settings.OPENAI_MODEL,
+            "model": "",
             "used_chunks": [],
         }
 
-    if not user_text:
+    question = user_text.strip()
+    if not question:
         return {
             "text": _insufficient_context_text(lang),
             "prompt_tokens": 0,
             "completion_tokens": 0,
             "total_tokens": 0,
-            "model": settings.OPENAI_MODEL,
+            "model": "",
             "used_chunks": [],
         }
 
@@ -436,84 +435,130 @@ async def get_rag_response(
     encoding = _token_encoding(settings.OPENAI_MODEL)
 
     try:
-        query_embedding = await generate_embedding(user_text)
+        from . import retrieval
+    except ImportError as exc:  # pragma: no cover - packaging issue
+        raise RuntimeError("retrieval module unavailable") from exc
+
+    try:
+        faq_matches = await retrieval.top_k_faqs(db, tenant_id, question)
     except Exception as exc:
         logger.error(
-            "Failed to generate query embedding",
+            "FAQ retrieval failed",
             extra={"tenant_id": tenant_id, "error": str(exc)},
         )
-        text = _fallback_text(lang)
+        _persist_zero_usage(db, tenant_id, trace_id)
         return {
-            "text": text,
+            "text": _fallback_text(lang),
             "prompt_tokens": 0,
             "completion_tokens": 0,
             "total_tokens": 0,
-            "model": settings.OPENAI_MODEL,
+            "model": "",
             "used_chunks": [],
         }
 
-    chunks = await _retrieve_similar_chunks(db, tenant_id, query_embedding)
-    context_text, used_chunks = _pack_context(chunks, encoding, _CONTEXT_TOKEN_BUDGET)
+    chunks = [
+        FAQChunk(
+            faq_id=int(item["id"]),
+            question=str(item["q"]),
+            answer=str(item["a"]),
+            score=float(item["score"]),
+        )
+        for item in faq_matches
+    ]
+
+    context_text, included_chunks = _pack_context(
+        chunks, encoding, _context_token_budget()
+    )
+
     tenant_prompt = None
     if isinstance(tenant, dict):
-        tenant_prompt = cast(Optional[str], tenant.get("system_prompt"))
-    messages = _build_messages(lang, context_text, user_text, tenant_prompt)
+        tenant_prompt = tenant.get("system_prompt")
 
-    if not used_chunks:
-        text = _insufficient_context_text(lang)
-        prompt_tokens_estimate = sum(
-            len(encoding.encode(_message_text(message))) for message in messages
-        )
-        return {
-            "text": text,
-            "prompt_tokens": prompt_tokens_estimate,
-            "completion_tokens": 0,
-            "total_tokens": prompt_tokens_estimate,
-            "model": settings.OPENAI_MODEL,
-            "used_chunks": [],
-        }
+    messages = _build_messages(lang, context_text, question, tenant_prompt)
+    prompt_tokens_estimate = _count_prompt_tokens(messages, encoding)
+
+    if redis is not None and trace_id and included_chunks:
+        try:
+            from redis_client import ns_key
+
+            cache_key = ns_key(f"rag:ctx:{trace_id}")
+        except Exception:
+            cache_key = f"rag:ctx:{trace_id}"
+        try:
+            payload = json.dumps(
+                [
+                    {"id": chunk.faq_id, "score": round(chunk.score, 4)}
+                    for chunk in included_chunks
+                ],
+                separators=(",", ":"),
+            )
+            await redis.setex(cache_key, 900, payload)
+        except Exception as exc:
+            logger.debug(
+                "Failed to cache RAG context",
+                extra={"trace_id": trace_id, "error": str(exc)},
+            )
 
     try:
-        completion_text, prompt_tokens, completion_tokens, model = await _call_openai(
-            messages
+        completion_text, prompt_tokens, completion_tokens, model = (
+            await _call_chat_completion(messages)
         )
+    except APIError as exc:
+        logger.error(
+            "OpenAI completion failed",
+            extra={"tenant_id": tenant_id, "error": str(exc)},
+        )
+        _persist_zero_usage(db, tenant_id, trace_id)
+        return {
+            "text": _fallback_text(lang),
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+            "model": "",
+            "used_chunks": _build_used_chunks(included_chunks),
+        }
     except Exception as exc:
         logger.error(
             "OpenAI completion failed",
             extra={"tenant_id": tenant_id, "error": str(exc)},
         )
-        text = _fallback_text(lang)
+        _persist_zero_usage(db, tenant_id, trace_id)
         return {
-            "text": text,
+            "text": _fallback_text(lang),
             "prompt_tokens": 0,
             "completion_tokens": 0,
             "total_tokens": 0,
-            "model": settings.OPENAI_MODEL,
-            "used_chunks": _build_used_chunks(used_chunks),
+            "model": "",
+            "used_chunks": _build_used_chunks(included_chunks),
         }
 
+    if prompt_tokens == 0:
+        prompt_tokens = prompt_tokens_estimate
     total_tokens = prompt_tokens + completion_tokens
-    try:
-        _persist_usage(
-            db=db,
-            tenant_id=tenant_id,
-            model=model,
-            prompt_tokens=prompt_tokens,
-            completion_tokens=completion_tokens,
-            total_tokens=total_tokens,
-            trace_id=trace_id,
-        )
-    except Exception as exc:
-        logger.error(
-            "Failed to persist usage",
-            extra={"tenant_id": tenant_id, "error": str(exc)},
-        )
+
+    _persist_usage(
+        db=db,
+        tenant_id=tenant_id,
+        model=model,
+        prompt_tokens=prompt_tokens,
+        completion_tokens=completion_tokens,
+        total_tokens=total_tokens,
+        trace_id=trace_id,
+    )
 
     return {
-        "text": completion_text,
+        "text": completion_text or _insufficient_context_text(lang),
         "prompt_tokens": prompt_tokens,
         "completion_tokens": completion_tokens,
         "total_tokens": total_tokens,
         "model": model,
-        "used_chunks": _build_used_chunks(used_chunks),
+        "used_chunks": _build_used_chunks(included_chunks),
     }
+
+
+__all__ = [
+    "FAQChunk",
+    "backfill_missing_faq_embeddings",
+    "generate_embedding",
+    "get_rag_response",
+]
