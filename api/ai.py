@@ -19,14 +19,13 @@ from openai import (
     RateLimitError,
 )
 from openai.types.chat import ChatCompletionMessageParam
-from redis.asyncio import Redis
 from sqlalchemy import Select, select
 from sqlalchemy.orm import Session
 
-from cache import get_cached_tenant
 from config import settings
 from logging_utils import get_logger
 from models import FAQ, Usage
+from services.tenant_config import get_tenant_config
 
 logger = get_logger(__name__)
 
@@ -407,7 +406,6 @@ async def get_rag_response(
     user_text: str,
     lang: str,
     db: Session,
-    redis: Redis,
     trace_id: str | None = None,
 ) -> Dict[str, Any]:
     if not _is_ai_enabled():
@@ -431,7 +429,7 @@ async def get_rag_response(
             "used_chunks": [],
         }
 
-    tenant = await get_cached_tenant(redis, db, tenant_id)
+    tenant = await get_tenant_config(db, tenant_id)
     if tenant is None:
         raise ValueError(f"Unknown tenant {tenant_id}")
 
