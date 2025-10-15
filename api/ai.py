@@ -556,9 +556,64 @@ async def get_rag_response(
     }
 
 
+async def generate_localized_phrase(
+    *, key: str, lang: str, template: str, variables: Dict[str, Any]
+) -> str:
+    """Generate a localized phrase using the chat completion endpoint."""
+
+    if not _is_ai_enabled():
+        try:
+            return template.format(**variables)
+        except Exception:
+            return template
+
+    lang_code = _resolve_language(lang)
+    try:
+        rendered_template = template.format(**variables)
+    except Exception:
+        rendered_template = template
+
+    messages: List[ChatCompletionMessageParam] = [
+        {
+            "role": "system",
+            "content": (
+                "You generate concise assistant phrases. "
+                "Respond in exactly the requested user language. "
+                "Do not add explanations or quotes."
+            ),
+        },
+        {
+            "role": "user",
+            "content": (
+                "Language code: {lang}.\n"
+                "Phrase key: {key}.\n"
+                "Reference sentence: {reference}.\n"
+                "Variables: {variables}.\n"
+                "Return only the localized assistant sentence ready to send."
+            ).format(
+                lang=lang_code,
+                key=key,
+                reference=rendered_template,
+                variables=json.dumps(variables, ensure_ascii=False),
+            ),
+        },
+    ]
+
+    try:
+        completion_text, *_ = await _call_chat_completion(messages)
+    except Exception as exc:  # pragma: no cover - network path
+        logger.warning(
+            "Failed to generate localized phrase", extra={"key": key, "error": str(exc)}
+        )
+        return rendered_template
+
+    return (completion_text or rendered_template).strip()
+
+
 __all__ = [
     "FAQChunk",
     "backfill_missing_faq_embeddings",
     "generate_embedding",
+    "generate_localized_phrase",
     "get_rag_response",
 ]

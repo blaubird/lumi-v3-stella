@@ -110,3 +110,8 @@ yp1pcw-codex/fix-crash-related-to-pydantic-import
 - Rebuilt `get_rag_response` to call a dedicated pgvector retrieval helper, enforce token budgets with `tiktoken`, and stream retries via `tenacity` with telemetry + Redis trace breadcrumbs.
 - Added `api/retrieval.py` for embedding generation + cosine search, wired routers to pass Redis handles, and persisted usage records on both success and failure paths.
 - Delivered an async CLI to backfill FAQ embeddings in batches so operations can heal legacy data purely through environment configuration.
+
+## Dec 15 2025 · Vacation wizard migration follow-up
+- Restored `001_initial_schema` to its canonical bootstrap so fresh databases stay deterministic.
+- Added Alembic revision `003_vacation_wizard` that idempotently creates owner contact and unavailability tables plus indexes.
+- Confirmed pytest vacation wizard suite passes against the new migration chain.

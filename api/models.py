@@ -7,8 +7,8 @@ from sqlalchemy import (
     Enum,
     TIMESTAMP,
     DateTime,
+    Date,
     Boolean,
-    BigInteger,
     text,
 )
 from sqlalchemy.orm import relationship
@@ -82,7 +82,7 @@ class FAQ(Base):
 class Usage(Base):
     __tablename__ = "usage"
 
-    id = Column(BigInteger, primary_key=True, index=True, autoincrement=True)
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
     tenant_id = Column(
         String(255),
         ForeignKey("tenants.id", ondelete="CASCADE"),
@@ -94,7 +94,9 @@ class Usage(Base):
     msg_ts = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     model = Column(String(255), nullable=True)
     prompt_tokens = Column(Integer, nullable=False, default=0, server_default=text("0"))
-    completion_tokens = Column(Integer, nullable=False, default=0, server_default=text("0"))
+    completion_tokens = Column(
+        Integer, nullable=False, default=0, server_default=text("0")
+    )
     total_tokens = Column(Integer, nullable=False, default=0, server_default=text("0"))
     trace_id = Column(String(255), nullable=True)
 
@@ -129,10 +131,47 @@ class Appointment(Base):
     created_ts = Column(DateTime(timezone=True), server_default=func.now())
 
 
+class OwnerContact(Base):
+    __tablename__ = "owner_contacts"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    tenant_id = Column(
+        String(255),
+        ForeignKey("tenants.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    phone_number = Column(String(64), nullable=False, index=True)
+    display_name = Column(String(255), nullable=True)
+    created_ts = Column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class Unavailability(Base):
+    __tablename__ = "unavailability"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    tenant_id = Column(
+        String(255),
+        ForeignKey("tenants.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    owner_phone = Column(String(64), nullable=False)
+    starts_on = Column(Date, nullable=False)
+    ends_on = Column(Date, nullable=False)
+    created_ts = Column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
 __all__ = [
     "Tenant",
     "Message",
     "FAQ",
     "Usage",
     "Appointment",
+    "OwnerContact",
+    "Unavailability",
 ]
