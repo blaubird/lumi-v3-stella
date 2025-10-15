@@ -110,3 +110,7 @@ yp1pcw-codex/fix-crash-related-to-pydantic-import
 - Rebuilt `get_rag_response` to call a dedicated pgvector retrieval helper, enforce token budgets with `tiktoken`, and stream retries via `tenacity` with telemetry + Redis trace breadcrumbs.
 - Added `api/retrieval.py` for embedding generation + cosine search, wired routers to pass Redis handles, and persisted usage records on both success and failure paths.
 - Delivered an async CLI to backfill FAQ embeddings in batches so operations can heal legacy data purely through environment configuration.
+
+## Dec 18 2025 · Retrieval import hotfix
+- **Root cause**: the lazy `from . import retrieval` fails when `api` is loaded as the app dir, raising `ImportError` on the first RAG request.
+- **Fix**: swap in an absolute `import retrieval` so Hypercorn (and other ASGI servers) can resolve the helper module without a package context.

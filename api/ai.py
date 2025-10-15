@@ -435,7 +435,7 @@ async def get_rag_response(
     encoding = _token_encoding(settings.OPENAI_MODEL)
 
     try:
-        from . import retrieval
+        import retrieval
     except ImportError as exc:  # pragma: no cover - packaging issue
         raise RuntimeError("retrieval module unavailable") from exc
 
