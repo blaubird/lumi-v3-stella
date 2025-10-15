@@ -115,3 +115,8 @@ yp1pcw-codex/fix-crash-related-to-pydantic-import
 - Restored `001_initial_schema` to its canonical bootstrap so fresh databases stay deterministic.
 - Added Alembic revision `003_vacation_wizard` that idempotently creates owner contact and unavailability tables plus indexes.
 - Confirmed pytest vacation wizard suite passes against the new migration chain.
+
+## Dec 16 2025 · Vacation wizard chain repair
+- Verified the accidental edits were rolled back from `001_initial_schema`, keeping only the canonical bootstrap DDL.
+- Hardened `003_vacation_wizard` so it alone provisions vacation-wizard tables, indexes, and exclusion constraint with inspector-based guards.
+- Documented downgrade protections that drop objects only when present, keeping re-runs and partially applied upgrades safe.
