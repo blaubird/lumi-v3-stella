@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from database import SessionLocal
 from models import Tenant, Message, Usage, Appointment
 from services.tenant_config import get_tenant_config, get_tenant_faqs
+from services.vacation_wizard import handle_vacation_wizard
 import re
 from ai import get_rag_response
 from services.whatsapp import send_whatsapp_message
@@ -180,6 +181,48 @@ async def process_message(
         )
         db.add(usage_record)
         db.commit()
+
+        wizard_result = await handle_vacation_wizard(
+            db=db,
+            tenant_id=cast(str, tenant["id"]),
+            admin_phone=cast(str, from_number),
+            text=text,
+            message=message,
+            redis_client=redis_client,
+        )
+        if wizard_result:
+            reply = wizard_result.text
+            token_count = len(reply.split())
+
+            bot_message = Message(
+                tenant_id=cast(str, tenant["id"]),
+                role="assistant",
+                text=reply,
+                tokens=token_count,
+            )
+            db.add(bot_message)
+
+            outbound_usage = Usage(
+                tenant_id=cast(str, tenant["id"]),
+                direction="outbound",
+                tokens=token_count,
+                msg_ts=ts,
+                model=None,
+                prompt_tokens=0,
+                total_tokens=token_count,
+                completion_tokens=token_count,
+                trace_id=trace_id,
+            )
+            db.add(outbound_usage)
+            db.commit()
+
+            await send_whatsapp_message(
+                phone_id=cast(str, tenant["phone_id"]),
+                token=cast(str, tenant["wh_token"]),
+                recipient=cast(str, from_number),
+                message=reply,
+            )
+            return
 
         m = BOOK_RE.search(text)
         if m:

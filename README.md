@@ -2,6 +2,30 @@
 
 This repository contains the FastAPI backend for Lumi's multi-channel assistant. It exposes webhook handlers, admin tooling, and retrieval-augmented generation (RAG) endpoints backed by PostgreSQL and Redis.
 
+## Owner How-To
+
+Owners can now schedule vacation blocks directly in chat—no admin panel or API calls required. The assistant mirrors the language of the incoming message at every step, so **write in your own language and Lumi will answer in that language**.
+
+Steps:
+
+1. Send a single-word "Vacation" trigger (e.g. `Vacances`, `Vacation`, `Отпуск`, `Urlaub`).
+2. Reply with the start date when prompted.
+3. Reply with the end date.
+4. Confirm with ✅ to save or ❌ to cancel.
+
+Example conversation (French):
+
+```
+👤 Vacances
+🤖 Quelle est la date de début de vos congés ?
+👤 24/12/2024
+🤖 Parfait. Et quand se termine-t-il ?
+👤 08/01/2025
+🤖 Merci de confirmer : du 2024-12-24 au 2025-01-08 (✅ pour enregistrer, ❌ pour annuler).
+👤 ✅
+🤖 Enregistré ! Profitez de vos congés.
+```
+
 ## Redis configuration
 
 Provide Redis connectivity through environment variables. `REDIS_URL` is optional at startup—when omitted the API falls back to database reads without caching.
