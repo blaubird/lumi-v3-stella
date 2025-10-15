@@ -1,192 +1,98 @@
-import os
-from typing import List, cast, Optional
+from __future__ import annotations
+
+from contextlib import contextmanager
+from typing import Iterator
 from uuid import uuid4
-from openai import AsyncOpenAI
-from openai.types.chat import ChatCompletionMessageParam
-from database import SessionLocal
-from models import Tenant, Message, Usage
-from ai import find_relevant_faqs
-from services.whatsapp import send_whatsapp_message
+
+from sqlalchemy.orm import Session
+
+from ai import get_rag_response
+from deps import get_db
 from logging_utils import get_logger
+from models import Message, Tenant
+from redis_client import redis_wrapper
+from services.whatsapp import send_whatsapp_message
+from utils.i18n import detect_lang
 
 logger = get_logger(__name__)
-logger_ai = get_logger("api.ai")
 
-# Get OpenAI model from environment
-OPENAI_MODEL = os.getenv(
-    "OPENAI_MODEL", "ft:gpt-4.1-nano-2025-04-14:luminiteq:flora:Bdezn8Rp"
-)
+
+@contextmanager
+def _session_scope() -> Iterator[Session]:
+    """Provide a transactional scope around operations."""
+
+    generator = get_db()
+    db = next(generator)
+    try:
+        yield db
+    finally:
+        generator.close()
 
 
 async def process_ai_reply(tenant_id: str, wa_msg_id: str, user_text: str) -> None:
-    """
-    Process AI reply asynchronously
+    """Generate and dispatch an AI reply using the shared RAG pipeline."""
 
-    Args:
-        tenant_id: Tenant ID
-        wa_msg_id: WhatsApp message ID
-        text: User message text
-    """
-    # Create a new database session
-    db = SessionLocal()
-    tenant: Optional[Tenant] = None
+    logger.info(
+        "Starting AI reply processing",
+        extra={"tenant_id": tenant_id, "wa_msg_id": wa_msg_id, "text_length": len(user_text)},
+    )
+
+    trace_id = str(uuid4())
 
     try:
-        logger.info(
-            "Starting AI reply processing",
-            extra={
-                "tenant_id": tenant_id,
-                "wa_msg_id": wa_msg_id,
-                "text_length": len(user_text),
-            },
-        )
+        with _session_scope() as db:
+            tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
+            if tenant is None:
+                logger.error("Tenant not found", extra={"tenant_id": tenant_id})
+                return
 
-        # Get tenant information
-        tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
-        if tenant is None:
-            logger.error("Tenant not found", extra={"tenant_id": tenant_id})
-            return
-
-        # Run embedding lookup and retrieve top-K FAQs
-        relevant_faqs = await find_relevant_faqs(db, tenant_id, user_text, top_k=3)
-
-        # Build context from FAQs
-        faq_context = ""
-        if relevant_faqs:
-            faq_parts = []
-            for i, faq in enumerate(relevant_faqs):
-                faq_parts.append(f"FAQ {i+1}:\nQ: {faq.question}\nA: {faq.answer}")
-            faq_context = "Relevant information from knowledge base:\n" + "\n\n".join(
-                faq_parts
-            )
-        else:
-            faq_context = (
-                "No specific information found in the knowledge base for this query."
-            )
-
-        # Build messages list with system prompt first
-        messages: List[ChatCompletionMessageParam] = [
-            {
-                "role": "system",
-                "content": cast(str, tenant.system_prompt) + "\n\n" + faq_context,
-            }
-        ]
-
-        # Add recent conversation history
-        history_messages = (
-            db.query(Message)
-            .filter_by(tenant_id=tenant_id)
-            .order_by(Message.id.desc())
-            .limit(6)  # Last 3 exchanges (3 user + 3 bot messages)
-            .all()[::-1]  # Reverse to get chronological order
-        )
-
-        for msg in history_messages:
-            role = cast(str, msg.role)
-            standardized_role = (
-                "inbound" if role == "user" else "assistant" if role == "bot" else role
-            )
-            messages.append(
-                cast(
-                    ChatCompletionMessageParam,
-                    {"role": standardized_role, "content": cast(str, msg.text)},
+            if not tenant.phone_id or not tenant.wh_token:
+                logger.error(
+                    "Tenant missing WhatsApp credentials",
+                    extra={"tenant_id": tenant_id},
                 )
+                return
+
+            lang = detect_lang(user_text)
+            response = await get_rag_response(
+                tenant_id=str(tenant.id),
+                user_text=user_text,
+                lang=lang,
+                db=db,
+                redis=redis_wrapper.client,
+                trace_id=trace_id,
             )
 
-        # Add current user message
-        messages.append(
-            cast(ChatCompletionMessageParam, {"role": "inbound", "content": user_text})
-        )
+            reply_text = response.get("text", "")
+            total_tokens = int(response.get("total_tokens", 0))
 
-        logger_ai.info(f"Calling model {OPENAI_MODEL}")
-
-        logger.info(
-            "Calling OpenAI API",
-            extra={
-                "tenant_id": tenant.id,
-                "model": OPENAI_MODEL,
-                "message_count": len(messages),
-                "temperature": 0.4,
-            },
-        )
-
-        # Call OpenAI API
-        api_key = os.getenv("OPENAI_API_KEY")
-        if not api_key:
-            logger.error("OPENAI_API_KEY environment variable not set")
-            return
-
-        ai = AsyncOpenAI(api_key=api_key)
-
-        try:
-            response = await ai.chat.completions.create(
-                model=OPENAI_MODEL,
-                messages=cast(List[ChatCompletionMessageParam], messages),
-                temperature=0.4,
-            )
-
-            # Extract reply text and token count
-            reply_text = response.choices[0].message.content or ""
-            usage = response.usage
-            token_count = (
-                usage.total_tokens if usage and usage.total_tokens is not None else 0
-            )
-
-            logger.info(
-                "Received OpenAI response",
-                extra={
-                    "tenant_id": tenant.id,
-                    "token_count": token_count,
-                    "reply_length": len(reply_text),
-                },
-            )
-
-            # Save bot message
             bot_message = Message(
-                tenant_id=tenant.id,
+                tenant_id=str(tenant.id),
                 role="assistant",
                 text=reply_text,
-                tokens=token_count,
+                tokens=total_tokens,
             )
             db.add(bot_message)
-
-            # Insert outbound usage record
-            usage_record = Usage(
-                tenant_id=tenant.id,
-                direction="outbound",
-                tokens=token_count,
-                total_tokens=token_count,
-                completion_tokens=token_count,
-                trace_id=str(uuid4()),
-            )
-            db.add(usage_record)
             db.commit()
 
-            # Get WhatsApp credentials from tenant
-            phone_id = os.getenv("WH_PHONE_ID") or cast(str, tenant.phone_id)
-            token = os.getenv("WH_TOKEN") or cast(str, tenant.wh_token)
+            recipient = wa_msg_id.split(":")[0] if ":" in wa_msg_id else wa_msg_id
 
-            # Extract user phone from wa_msg_id (format: "phone:message_id")
-            user_phone = wa_msg_id.split(":")[0] if ":" in wa_msg_id else wa_msg_id
-
-            # Send WhatsApp message
-            await send_whatsapp_message(phone_id, token, user_phone, reply_text)
+            await send_whatsapp_message(
+                phone_id=str(tenant.phone_id),
+                token=str(tenant.wh_token),
+                recipient=recipient,
+                message=reply_text,
+            )
 
             logger.info(
                 "WhatsApp message sent",
-                extra={"tenant_id": tenant.id, "to": user_phone},
+                extra={"tenant_id": tenant_id, "recipient": recipient, "tokens": total_tokens},
             )
-        except Exception as e:
-            logger_ai.error(f"OpenAI error: {e}")
-            return
-
-    except Exception as e:
+    except Exception as exc:  # pragma: no cover - defensive logging
         logger.error(
             "Error in process_ai_reply",
-            extra={"tenant_id": tenant.id if tenant else "unknown", "error": str(e)},
-            exc_info=e,
+            extra={"tenant_id": tenant_id, "error": str(exc), "trace_id": trace_id},
+            exc_info=exc,
         )
     finally:
-        # Close the DB session
-        db.close()
-        logger.info("AI reply processing completed", extra={"tenant_id": tenant_id})
+        logger.info("AI reply processing completed", extra={"tenant_id": tenant_id, "trace_id": trace_id})

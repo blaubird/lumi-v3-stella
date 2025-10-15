@@ -119,6 +119,8 @@ class RedisWrapper:
         if self.client is None:
             return
         try:
+            # redis-py 6.4.0 exposes ``aclose`` on asyncio clients (validated via tests),
+            # matching our async usage. ``close`` remains for sync clients.
             await self.client.aclose()
         except Exception as exc:  # pragma: no cover - close errors rare
             logger.debug(
