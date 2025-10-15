@@ -1,39 +1,32 @@
-import os
 import json
-from typing import Any, Dict, Optional, cast
+import re
+from datetime import datetime, timezone
+from typing import Any, Mapping, Optional, cast
 from uuid import uuid4
-from fastapi import APIRouter, Depends, Request, Query, Response
+
+from fastapi import APIRouter, Depends, Query, Request, Response
 from sqlalchemy.orm import Session
-from database import SessionLocal
-from models import Tenant, Message, Usage, Appointment
+
+from ai import get_rag_response
+from config import settings
+from deps import get_db
+from logging_utils import get_logger
+from models import Appointment, Message, Tenant, Usage
 from services.tenant_config import get_tenant_config, get_tenant_faqs
 from services.vacation_wizard import handle_vacation_wizard
-import re
-from ai import get_rag_response
 from services.whatsapp import send_whatsapp_message
-from logging_utils import get_logger
 from utils.i18n import detect_lang, tr
 from utils.ics_generator import generate_ics
-from datetime import datetime, timezone
 
 # Initialize logger
 logger = get_logger(__name__)
 BOOK_RE = re.compile(r"\bbook\s+(\d{1,2}[/-]\d{1,2})\s+(\d{1,2}:\d{2})", re.I)
 
 # Define verification token as a constant
-VERIFY_TOKEN = os.getenv("VERIFY_TOKEN", "lumi-verify-6969")
+VERIFY_TOKEN = settings.VERIFY_TOKEN
 
 # Use router without trailing slash to avoid 307 redirects
 router = APIRouter(tags=["Webhook"])
-
-
-# Dependency to get DB session
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
 
 
 @router.get("/webhook")
@@ -118,8 +111,8 @@ async def webhook_handler(request: Request, db: Session = Depends(get_db)):
 
 async def process_message(
     db: Session,
-    tenant: Dict[str, Any],
-    message: Dict[str, Any],
+    tenant: Mapping[str, Any],
+    message: Mapping[str, Any],
     redis_client: Optional[Any],
 ):
     """
@@ -266,9 +259,6 @@ async def process_message(
                 lang = detect_lang(text)
                 dt_str = starts_at.strftime("%d/%m %H:%M")
                 reply = tr("booking.confirmed", lang, dt=dt_str)
-                token_count = len(reply.split())
-
-                reply = f"✅ booked for {starts_at.strftime('%d/%m %H:%M')}. You’ll get a reminder."
                 token_count = len(reply.split())
 
                 bot_message = Message(

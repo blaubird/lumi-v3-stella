@@ -2,7 +2,8 @@ from prometheus_client import Counter, Histogram, CollectorRegistry
 from fastapi import FastAPI, Depends, HTTPException
 from sqlalchemy import text
 from sqlalchemy.orm import Session
-from database import SessionLocal
+
+from deps import get_db
 from logging_utils import get_logger
 
 # Initialize logger
@@ -70,15 +71,6 @@ def setup_metrics(app: FastAPI):
     return app
 
 
-# Dependency to get DB session for health check
-def get_db_health_check():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
-
-
 def add_health_check_endpoint(app: FastAPI):
     """
     Adds a comprehensive health check endpoint to the FastAPI application.
@@ -90,7 +82,7 @@ def add_health_check_endpoint(app: FastAPI):
         summary="Health Check",
         response_description="Application health status",
     )
-    async def health_check(db: Session = Depends(get_db_health_check)):
+    async def health_check(db: Session = Depends(get_db)):
         logger.info("Health check requested")
         status = {"status": "ok", "dependencies": {}}
 

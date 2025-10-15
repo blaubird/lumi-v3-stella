@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, datetime
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Mapping
 
 from redis.asyncio import Redis
 from sqlalchemy.orm import Session
@@ -18,7 +18,7 @@ logger = get_logger(__name__)
 
 REDIS_TTL_SECONDS = 300
 
-TRIGGER_WORDS: Dict[str, str] = {
+TRIGGER_WORDS: Mapping[str, str] = {
     "vacation": "en",
     "vacances": "fr",
     "vacaciones": "es",
@@ -46,9 +46,9 @@ async def handle_vacation_wizard(
     tenant_id: str,
     admin_phone: str,
     text: str,
-    message: Dict[str, Any],
-    redis_client: Optional[Redis],
-) -> Optional[WizardReply]:
+    message: Mapping[str, Any],
+    redis_client: Redis | None,
+) -> WizardReply | None:
     if redis_client is None:
         logger.debug("Redis unavailable; vacation wizard disabled")
         return None
@@ -222,7 +222,7 @@ async def handle_vacation_wizard(
     return None
 
 
-async def _load_state(redis_client: Redis, key: str) -> Dict[str, str]:
+async def _load_state(redis_client: Redis, key: str) -> Mapping[str, str]:
     data = await redis_client.hgetall(key)
     return data or {}
 
@@ -231,7 +231,7 @@ def _is_trigger(word: str) -> bool:
     return word in TRIGGER_WORDS and " " not in word
 
 
-def _detect_trigger_language(message: Dict[str, Any], text: str) -> str:
+def _detect_trigger_language(message: Mapping[str, Any], text: str) -> str:
     language_info = message.get("language")
     if isinstance(language_info, dict):
         lang_code = language_info.get("code") or language_info.get("policy")
@@ -266,8 +266,8 @@ def _fallback_language_from_text(text: str) -> str:
 
 
 def _parse_date(
-    raw: str, reference_year: Optional[int] = None
-) -> Optional[Tuple[date, bool]]:
+    raw: str, reference_year: int | None = None
+) -> tuple[date, bool] | None:
     raw = raw.strip()
     if not raw:
         return None
