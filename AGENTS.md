@@ -1,100 +1,111 @@
-1 · Mission Statement
-Ship production-ready code for the lumi-v3-stella backend while preserving existing architecture and anticipating upcoming features (Telegram, Instagram, calendar).
-– No runtime errors.
-– No interface regressions.
-– Clean, coherent diffs only.
+# Project lumi-v3-stella: A Guide for AI Agents
 
-2 · Reference Architecture (must stay intact)
-bash
-Copy
-Edit
+**Version:** 2.0
+**Last Updated:** October 15, 2025
+
+## 1. Mission Statement
+
+Our primary objective is to ship high-quality, production-ready code for the `lumi-v3-stella` backend. This involves not only implementing new features but also preserving the existing architecture and ensuring the stability and performance of the application. Key upcoming features to anticipate include integrations with Telegram, Instagram, and a calendar service.
+
+### Core Directives:
+
+*   **Zero Runtime Errors:** All code must be robust and handle exceptions gracefully.
+*   **No Interface Regressions:** Changes should not break existing API contracts or functionality.
+*   **Clean and Coherent Diffs:** Commits should be atomic, well-documented, and easy to review.
+
+## 2. Reference Architecture
+
+The project follows a modular architecture that must be maintained. All new code should be placed in the appropriate directory to ensure consistency and prevent circular dependencies.
+
+```bash
 api/
- ├─ main.py           # FastAPI entry, env validation, migrations, scheduler
- ├─ models.py         # ORM: Tenant, Message, FAQ, Usage, Appointment, …
- ├─ routers/          # webhook.py, admin.py, rag.py (per resource)
- ├─ services/         # whatsapp.py (+future telegram.py, instagram.py, calendar.py)
- ├─ utils/            # helpers (logging, i18n, ics_generator, …)
- ├─ jobs/             # background jobs (confirm_pending, send_reminders, …)
- └─ tasks.py          # Celery/async tasks
-alembic/               # 001_initial_schema.py ONLY
-site/                  # frontend (no backend code here)
-Upcoming modules (placeholders exist in Upcoming Features.md):
-services/telegram.py, services/instagram.py, services/calendar.py.
+ ├─ main.py           # FastAPI entry point, environment validation, Alembic migrations, and scheduler setup
+ ├─ models.py         # SQLAlchemy ORM models (e.g., Tenant, Message, Appointment)
+ ├─ routers/          # API routers for different resources (e.g., webhook.py, admin.py)
+ ├─ services/         # Business logic and integrations with external services (e.g., WhatsApp, Google Calendar)
+ ├─ utils/            # Utility functions and helpers (e.g., logging, internationalization)
+ ├─ jobs/             # Asynchronous background jobs (e.g., sending reminders)
+ └─ tasks.py          # Celery/async task definitions
+alembic/
+ └─ versions/         # Alembic migration scripts (e.g., 001_initial_schema.py)
+site/                  # Frontend application code (no backend code here)
+```
 
-3 · Workflow Checklist (must follow)
-#	Action
-1	Pull latest main. Fail if local branch is behind.
-2	Run ruff --fix + black ..
-3	Type-check: pyright (no NameError, no Any).
-4	alembic upgrade head && alembic downgrade -1 must pass.
-5	Launch with hypercorn main:app -k asyncio … — no tracebacks.
-6	Smoke-test critical route(s) changed.
-7	Commit full files, keep diff minimal.
-8	Update requirements.txt & env-var docs when importing new libs.
-9	Record reasoning in EXPLANATIONS.md—max 200 words.
+### Upcoming Modules:
 
-4 · Coding Standards
-Imports sorted by ruff-isort.
+*   `services/telegram.py`
+*   `services/instagram.py`
+*   `services/calendar.py`
 
-Type hints everywhere except trivial lambdas.
+## 3. Workflow Checklist
 
-Constants in api/constants.py; no magic strings.
+To ensure code quality and consistency, every contribution must follow this workflow:
 
-Logging via logging_utils.get_logger(); never print().
+| Step | Action                                                                 |
+| :--- | :--------------------------------------------------------------------- |
+| 1    | Pull the latest `main` branch. Your local branch must be up-to-date.     |
+| 2    | Run `ruff --fix .` and `black .` to format the code.                     |
+| 3    | Perform static type checking with `pyright`. Ensure no `NameError` or `Any` types. |
+| 4    | Verify Alembic migrations: `alembic upgrade head` and `alembic downgrade -1` must pass without errors. |
+| 5    | Launch the application locally (e.g., `hypercorn main:app -k asyncio`). Ensure no tracebacks on startup. |
+| 6    | Smoke-test the critical API routes that have been modified.              |
+| 7    | Commit the full files, keeping the diff minimal and focused.             |
+| 8    | Update `requirements.txt` and environment variable documentation when adding new libraries. |
+| 9    | Document the reasoning for your changes in `EXPLANATIONS.md` (max 200 words). |
 
-DB enums: always update both Alembic & ORM.
+## 4. Coding Standards
 
-Retry external calls with tenacity (0.5 → 8 s back-off).
+*   **Imports:** All imports must be sorted using `ruff-isort`.
+*   **Type Hinting:** Type hints are mandatory for all functions and variables, except for trivial lambdas.
+*   **Constants:** All constants should be defined in `api/constants.py` to avoid magic strings.
+*   **Logging:** Use the `logging_utils.get_logger()` utility for all logging. Do not use `print()`.
+*   **Database Enums:** When updating a database enum, you must update both the Alembic migration and the SQLAlchemy ORM model.
+*   **External Calls:** All external API calls must be wrapped with `tenacity` for retries, using an exponential back-off strategy (e.g., 0.5s to 8s).
+*   **Background Jobs:** Each background job should run in its own database session and must always commit or roll back the session.
 
-Background jobs: new session per run, always commit/rollback.
+## 5. Alembic Migration Policy
 
-5 · Files & Migration Policy
-Migrations: modify alembic/versions/001_initial_schema.py; keep a single migration file.
+The previous policy of maintaining a single migration file has been identified as the root cause of persistent and critical migration failures. This policy is now deprecated and must not be followed.
 
-Models: update __all__ list.
+### New Migration Policy:
 
-Routers: plural paths (/messages, /appointments).
+*   **Create New Migration Files for Every Change:** For any and all schema modifications, a new Alembic migration file must be generated using the `alembic revision -m "<description>"` command. **Do not, under any circumstances, modify existing migration files.**
+*   **Write Idempotent Migrations:** All `upgrade` and `downgrade` functions should be written to be idempotent (i.e., they can be run multiple times without causing errors). Use `inspector.has_table()` and similar checks to ensure that operations are only performed if necessary.
+*   **Maintain a Clean Migration Chain:** The migration history must be a clean, linear sequence of changes. Each migration file should represent a single, atomic change to the database schema.
 
-Services: wrap API logic; no DB code inside.
+## 6. Guardrails for Consistency
 
-Jobs: one job = one file; idempotent.
+| Problem Class             | Guard                                                                 |
+| :------------------------ | :-------------------------------------------------------------------- |
+| Undefined Symbol          | Static type checking with `pyright` (Workflow Step #3).               |
+| Enum Mismatch             | Synchronize the Alembic enum with the ORM `Enum`.                     |
+| Missing Credentials       | Raise a clear `RuntimeError` if a required environment variable is missing. |
+| Timezone Drift            | Store all timestamps as `TIMESTAMPTZ` and only convert on output.      |
+| Spaghetti Code            | Place new code in the correct folder as per the architecture. No circular imports. |
 
-6 · Guardrails for Consistency
-Problem class	Guard
-Undefined symbol	Static type check step (#3).
-Enum mismatch	Sync Alembic enum + ORM Enum.
-Calendar / external creds	Raise clear RuntimeError if env missing.
-Timezone drift	Store TIMESTAMPTZ; convert on output only.
-Growth of spaghetti	Place new code in correct folder; no circular imports.
+## 7. Performance & Observability
 
-7 · Performance & Observability
-API latency target: < 200 ms p95.
+*   **API Latency:** The target for API latency is < 200 ms at the 95th percentile (p95).
+*   **Database Queries:** Ensure that appropriate indexes are in place before adding queries that use `ILIKE` or other potentially slow operations.
+*   **Monitoring:** When adding new routers, expose relevant counters via `monitoring.py` using the `PROMETHEUS_PORT` environment variable.
 
-DB: ensure indices before adding ILIKE queries.
+## 8. Upcoming Feature Awareness
 
-Prometheus: expose new counters via monitoring.py if adding routers.
+When implementing new features, be mindful of the upcoming integrations:
 
-Use PROMETHEUS_PORT env var.
+*   **Telegram:** `services/telegram.py`, `/telegram_webhook` router.
+*   **Instagram:** `services/instagram.py`, `/instagram_webhook` router.
+*   **Calendar:** `services/calendar.py`, re-using the `Appointment.google_event_id` field.
 
-8 · Upcoming Feature Awareness
-Leave extension points:
+Avoid hard-coding channel-specific logic in the core application. Instead, use a façade like `send_text(channel, ...)` to abstract the communication channels.
 
-Telegram → services/telegram.py, /telegram_webhook router.
+## 9. Commit Etiquette
 
-Instagram → services/instagram.py, /instagram_webhook.
+*   **Commit Messages:** Prefix all commit messages with `[Fix]`, `[Feat]`, `[Refactor]`, or `[Docs]`.
+*   **Branch Protection:** If branch protection rules block a merge, request a review. Do not push directly to `main`.
 
-Calendar → functions in services/calendar.py, re-use Appointment.google_event_id.
+## 10. Fallback Language
 
-Do not bake hard-coded channel logic in core; route through send_text(channel, …) façade.
+*   The main client-facing language is French, BUT bot has to respond using the language of the clients, any available for ChatGPT language
+*   Use the `utils/i18n.py::tr()` function to localize all user-facing replies. If a translation is not present, add it.
 
-9 · Commit Etiquette
-Message prefix [Fix], [Feat], [Refactor], [Docs].
-
-If branch protection blocks merge, request review—no direct push to main.
-
-10 · Fallback Language
-Client-facing default French; fallback English.
-
-Use utils/i18n.py::tr() to localise replies (already present or create).
-
-End of agents.md
