@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+from typing import Sequence
+
 import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.engine import Connection, Inspector
+from sqlalchemy.schema import SchemaItem
 
 revision = "003_vacation_wizard"
 down_revision = "002_usage_alignment"
@@ -24,7 +27,7 @@ EXCL_UNAVAILABILITY = "uq_unavailability_owner_dates"
 BTREE_GIST_EXTENSION = "btree_gist"
 
 
-OWNER_COLUMNS = [
+OWNER_COLUMNS: Sequence[SchemaItem] = [
     sa.Column("id", sa.Integer(), primary_key=True, autoincrement=True, nullable=False),
     sa.Column("tenant_id", sa.String(length=255), nullable=False),
     sa.Column("phone_number", sa.String(length=64), nullable=False),
@@ -38,7 +41,7 @@ OWNER_COLUMNS = [
     sa.ForeignKeyConstraint(["tenant_id"], [f"{SCHEMA}.tenants.id"], ondelete="CASCADE"),
 ]
 
-UNAVAIL_COLUMNS = [
+UNAVAIL_COLUMNS: Sequence[SchemaItem] = [
     sa.Column("id", sa.Integer(), primary_key=True, autoincrement=True, nullable=False),
     sa.Column("tenant_id", sa.String(length=255), nullable=False),
     sa.Column("owner_phone", sa.String(length=64), nullable=False),
@@ -57,12 +60,13 @@ UNAVAIL_COLUMNS = [
 def _create_table_if_missing(
     inspector: Inspector,
     table_name: str,
-    columns: list[sa.Column],
+    elements: Sequence[SchemaItem],
 ) -> None:
     if inspector.has_table(table_name, schema=SCHEMA):
         return
 
-    op.create_table(table_name, *[column.copy() for column in columns], schema=SCHEMA)
+    copies = [element.copy() for element in elements]
+    op.create_table(table_name, *copies, schema=SCHEMA)
 
 
 def _ensure_index(
@@ -160,14 +164,12 @@ def upgrade() -> None:
 
 
 def _drop_index_if_exists(
-    inspector: Inspector,
+    connection: Connection,
     table_name: str,
     index_name: str,
 ) -> None:
-    existing = {
-        index["name"]
-        for index in inspector.get_indexes(table_name, schema=SCHEMA)
-    }
+    inspector = sa.inspect(connection)
+    existing = {index["name"] for index in inspector.get_indexes(table_name, schema=SCHEMA)}
     if index_name not in existing:
         return
 
@@ -179,8 +181,8 @@ def downgrade() -> None:
     inspector = sa.inspect(bind)
 
     if inspector.has_table(UNAVAIL_TABLE, schema=SCHEMA):
-        _drop_index_if_exists(inspector, UNAVAIL_TABLE, IDX_UNAVAIL_DATES)
-        _drop_index_if_exists(inspector, UNAVAIL_TABLE, IDX_UNAVAIL_TENANT)
+        _drop_index_if_exists(bind, UNAVAIL_TABLE, IDX_UNAVAIL_DATES)
+        _drop_index_if_exists(bind, UNAVAIL_TABLE, IDX_UNAVAIL_TENANT)
         if bind.dialect.name == "postgresql":
             op.execute(
                 sa.text(
@@ -197,6 +199,6 @@ def downgrade() -> None:
 
     inspector = sa.inspect(bind)
     if inspector.has_table(OWNER_TABLE, schema=SCHEMA):
-        _drop_index_if_exists(inspector, OWNER_TABLE, IDX_OWNER_PHONE)
-        _drop_index_if_exists(inspector, OWNER_TABLE, IDX_OWNER_TENANT)
+        _drop_index_if_exists(bind, OWNER_TABLE, IDX_OWNER_PHONE)
+        _drop_index_if_exists(bind, OWNER_TABLE, IDX_OWNER_TENANT)
         op.drop_table(OWNER_TABLE, schema=SCHEMA)
