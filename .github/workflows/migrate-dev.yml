@@ -24,6 +24,32 @@ jobs:
           python -m pip install --upgrade pip
           if [ -f api/requirements.txt ]; then pip install -r api/requirements.txt; else pip install alembic "psycopg[binary]" SQLAlchemy; fi
 
+      - name: Validate DATABASE_URL
+        run: |
+          if [ -z "${DATABASE_URL}" ]; then
+            echo "DATABASE_URL is not configured. Set secrets.DEV_DATABASE_URL." >&2
+            exit 1
+          fi
+          python - <<'PY'
+import os
+from sqlalchemy.engine import make_url
+from sqlalchemy.exc import ArgumentError
+
+raw_url = os.environ["DATABASE_URL"]
+try:
+    url = make_url(raw_url)
+except ArgumentError as exc:  # pragma: no cover - CI guard
+    raise SystemExit(f"Invalid DATABASE_URL: {exc}")
+
+if url.get_backend_name() != "postgresql":
+    raise SystemExit(f"DATABASE_URL must use the postgresql scheme, got '{url.drivername}'.")
+
+print("Validated DATABASE_URL driver: postgresql")
+PY
+
       - name: Run Alembic upgrade (dev)
         run: |
-          python -m alembic -c api/alembic.ini upgrade head
+          set -euo pipefail
+          CONFIG_PATH="$(realpath api/alembic.ini)"
+          echo "Using Alembic config: ${CONFIG_PATH}"
+          python -m alembic -c "${CONFIG_PATH}" upgrade head
