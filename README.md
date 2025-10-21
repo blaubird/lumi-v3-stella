@@ -75,5 +75,5 @@ The multi-stage Dockerfile installs Python deps once (layer cache) and copies so
   railway run --service api "alembic -c api/alembic.ini upgrade head"
   ```
 
-- The API no longer runs Alembic automatically. Set `RUN_MIGRATIONS_ON_STARTUP=true` only when you explicitly want startup to run `upgrade head` (default is `false`).
+- The API no longer runs Alembic automatically. Set `RUN_MIGRATIONS_ON_STARTUP` to `1`, `true`, or `yes` to opt-in to running `alembic upgrade head` on startup; omit the variable or set it to `0`, `false`, or `no` to skip (default is `false`).
 - CI keeps the dev database up to date through `.github/workflows/migrate-dev.yml`, which validates `secrets.DEV_DATABASE_URL` and runs `alembic -c api/alembic.ini upgrade head` on every push to `dev` or manual dispatch.

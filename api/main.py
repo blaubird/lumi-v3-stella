@@ -16,6 +16,11 @@ from config import settings  # Import settings
 from schemas.common import ErrorResponse  # Import ErrorResponse schema
 from redis_client import RedisWrapper, redis_wrapper
 import db_hooks  # noqa: F401
+from constants import (
+    FALSY_ENV_VALUES,
+    RUN_MIGRATIONS_ON_STARTUP_ENV_VAR,
+    TRUTHY_ENV_VALUES,
+)
 
 configure_basic_logging()
 logger = get_logger(__name__)
@@ -24,15 +29,45 @@ logger.info("Starting application")
 ALEMBIC_CONFIG_PATH = Path(__file__).with_name("alembic.ini")
 
 
+def _resolve_startup_migration_flag() -> tuple[bool, str, str]:
+    """Return whether startup migrations should run and how the flag was sourced."""
+
+    env_value = os.getenv(RUN_MIGRATIONS_ON_STARTUP_ENV_VAR)
+    if env_value is not None:
+        normalized_value = env_value.strip().lower()
+        if normalized_value in TRUTHY_ENV_VALUES:
+            return True, "env", env_value
+        if normalized_value in FALSY_ENV_VALUES:
+            return False, "env", env_value
+        logger.warning(
+            "Invalid RUN_MIGRATIONS_ON_STARTUP value; falling back to configured default",
+            extra={
+                "flag": RUN_MIGRATIONS_ON_STARTUP_ENV_VAR,
+                "value": env_value,
+            },
+        )
+    return (
+        settings.RUN_MIGRATIONS_ON_STARTUP,
+        "settings",
+        str(settings.RUN_MIGRATIONS_ON_STARTUP),
+    )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Initialize database engine
     logger.info("Initializing database engine")
 
-    if settings.RUN_MIGRATIONS_ON_STARTUP:
+    run_migrations, flag_source, raw_flag_value = _resolve_startup_migration_flag()
+
+    if run_migrations:
         logger.info(
             "RUN_MIGRATIONS_ON_STARTUP enabled; applying Alembic migrations",
-            extra={"alembic_ini": str(ALEMBIC_CONFIG_PATH)},
+            extra={
+                "alembic_ini": str(ALEMBIC_CONFIG_PATH),
+                "flag_source": flag_source,
+                "flag_value": raw_flag_value,
+            },
         )
         alembic_cfg = AlembicConfig(str(ALEMBIC_CONFIG_PATH))
         try:
@@ -49,8 +84,9 @@ async def lifespan(app: FastAPI):
         logger.info(
             "Skipping Alembic migrations on startup",
             extra={
-                "flag": "RUN_MIGRATIONS_ON_STARTUP",
-                "value": settings.RUN_MIGRATIONS_ON_STARTUP,
+                "flag": RUN_MIGRATIONS_ON_STARTUP_ENV_VAR,
+                "value": raw_flag_value,
+                "source": flag_source,
             },
         )
 
