@@ -6,6 +6,10 @@ Implemented appointment table and enum in migration with SQLite checks. Added Ap
 - Gated startup migrations behind `RUN_MIGRATIONS_ON_STARTUP`, tightened the dev workflow with Postgres validation, and surfaced the Alembic config path.
 - Documented how to run migrations locally and on Railway, keeping downgrade helpers tolerant of missing schema objects.
 
+## Dec 28 2025 · Startup migration opt-in
+- Normalised the startup migration flag so `RUN_MIGRATIONS_ON_STARTUP` honours explicit truthy/falsy environment values and warns on invalid input before falling back to config defaults.
+- Documented the accepted values so operators can opt-in safely without surprise reruns.
+
 ## July 3 Hotfix
 - **Root cause**: `FAQ` model wasn't imported in `api/ai.py`, causing a `NameError` during startup.
 - **Fixes applied**:
