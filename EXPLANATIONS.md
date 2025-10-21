@@ -120,3 +120,8 @@ yp1pcw-codex/fix-crash-related-to-pydantic-import
 - Verified the accidental edits were rolled back from `001_initial_schema`, keeping only the canonical bootstrap DDL.
 - Hardened `003_vacation_wizard` so it alone provisions vacation-wizard tables, indexes, and exclusion constraint with inspector-based guards.
 - Documented downgrade protections that drop objects only when present, keeping re-runs and partially applied upgrades safe.
+
+## Jan 5 2026 · Dev baseline reset
+- Squashed migrations into `001_initial_squashed` with enums, vector/btree_gist, and every ORM table/index as the new root.
+- Cleared historical revisions, documented the reset in README, and added a GitHub Action that upgrades the dev DB via `DEV_DATABASE_URL`.
+- Verified the Alembic wiring locally (fails on SQLite because it lacks the `public` schema; expect success against the dev Postgres cluster).

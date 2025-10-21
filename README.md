@@ -51,3 +51,7 @@ docker compose up --build api       # first build caches deps layer
 docker compose up api               # subsequent runs are fast
 ```  
 The multi-stage Dockerfile installs Python deps once (layer cache) and copies source separately, so code-only edits rebuild in seconds.
+
+## Dev baseline reset
+
+The shared dev database has been rebuilt with a single Alembic baseline `001_initial_squashed`. Point `DATABASE_URL` at the dev connection string and run `alembic upgrade head` from the `api/` directory to sync locally. Going forward, add a new Alembic revision for every schema change—never edit `001_initial_squashed`.
