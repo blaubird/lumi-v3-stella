@@ -1,5 +1,11 @@
 Implemented appointment table and enum in migration with SQLite checks. Added Appointment model and exports. Created google calendar helper. Updated webhook with booking regex to store appointments and reply. Verified migrations and hypercorn startup.
 
+## Dec 22 2025 · Alembic hardening
+- Enforced a Postgres-only `DATABASE_URL` in Alembic's env, with structured logging for resolved targets and online/offline execution.
+- Wrapped the squashed baseline in inspector-driven guards so enums, extensions, tables, indexes, and exclusion constraints are idempotent and logged.
+- Gated startup migrations behind `RUN_MIGRATIONS_ON_STARTUP`, tightened the dev workflow with Postgres validation, and surfaced the Alembic config path.
+- Documented how to run migrations locally and on Railway, keeping downgrade helpers tolerant of missing schema objects.
+
 ## July 3 Hotfix
 - **Root cause**: `FAQ` model wasn't imported in `api/ai.py`, causing a `NameError` during startup.
 - **Fixes applied**:

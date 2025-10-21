@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 from typing import Any, cast
 from fastapi import FastAPI, Request, status
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -20,17 +21,38 @@ configure_basic_logging()
 logger = get_logger(__name__)
 logger.info("Starting application")
 
+ALEMBIC_CONFIG_PATH = Path(__file__).with_name("alembic.ini")
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Initialize database engine
     logger.info("Initializing database engine")
 
-    # Run Alembic migrations at startup
-    logger.info("Running Alembic migrations...")
-    alembic_cfg = AlembicConfig("alembic.ini")
-    command.upgrade(alembic_cfg, "head")
-    logger.info("Migrations completed")
+    if settings.RUN_MIGRATIONS_ON_STARTUP:
+        logger.info(
+            "RUN_MIGRATIONS_ON_STARTUP enabled; applying Alembic migrations",
+            extra={"alembic_ini": str(ALEMBIC_CONFIG_PATH)},
+        )
+        alembic_cfg = AlembicConfig(str(ALEMBIC_CONFIG_PATH))
+        try:
+            command.upgrade(alembic_cfg, "head")
+        except Exception as exc:  # pragma: no cover - startup should fail loudly
+            logger.error(
+                "Alembic migration failed during startup",
+                extra={"alembic_ini": str(ALEMBIC_CONFIG_PATH)},
+                exc_info=exc,
+            )
+            raise
+        logger.info("Migrations completed")
+    else:
+        logger.info(
+            "Skipping Alembic migrations on startup",
+            extra={
+                "flag": "RUN_MIGRATIONS_ON_STARTUP",
+                "value": settings.RUN_MIGRATIONS_ON_STARTUP,
+            },
+        )
 
     # Setup metrics
     logger.info("Setting up metrics")

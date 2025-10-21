@@ -10,6 +10,7 @@ class Settings(BaseSettings):
     PROJECT_VERSION: str = "0.1.0"
 
     DATABASE_URL: str
+    RUN_MIGRATIONS_ON_STARTUP: bool = False
 
     REDIS_URL: str | None = None
     REDIS_DB: int | None = None

@@ -57,3 +57,23 @@ The multi-stage Dockerfile installs Python deps once (layer cache) and copies so
 - The shared dev database was reset and now boots from the squashed Alembic baseline `001_initial_squashed`.
 - To recreate the schema locally, export `DATABASE_URL` with the dev connection string and run `alembic -c api/alembic.ini upgrade head`.
 - For any future schema change, add a brand-new Alembic revision—never edit or replace `001_initial_squashed`.
+
+## Database migrations
+
+- Alembic lives under `api/alembic/` with the entry configuration at `api/alembic.ini` and migrations in `api/alembic/versions/`.
+- `DATABASE_URL` must point to PostgreSQL (e.g. `postgresql://...`). Alembic and the app will fail fast if the URL is missing or uses another dialect.
+- Run migrations locally with:
+
+  ```bash
+  export DATABASE_URL=postgresql://...  # Postgres only
+  alembic -c api/alembic.ini upgrade head
+  ```
+
+- Railway one-off deploys can apply migrations via:
+
+  ```bash
+  railway run --service api "alembic -c api/alembic.ini upgrade head"
+  ```
+
+- The API no longer runs Alembic automatically. Set `RUN_MIGRATIONS_ON_STARTUP=true` only when you explicitly want startup to run `upgrade head` (default is `false`).
+- CI keeps the dev database up to date through `.github/workflows/migrate-dev.yml`, which validates `secrets.DEV_DATABASE_URL` and runs `alembic -c api/alembic.ini upgrade head` on every push to `dev` or manual dispatch.
