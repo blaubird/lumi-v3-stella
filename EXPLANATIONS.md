@@ -120,3 +120,8 @@ yp1pcw-codex/fix-crash-related-to-pydantic-import
 - Verified the accidental edits were rolled back from `001_initial_schema`, keeping only the canonical bootstrap DDL.
 - Hardened `003_vacation_wizard` so it alone provisions vacation-wizard tables, indexes, and exclusion constraint with inspector-based guards.
 - Documented downgrade protections that drop objects only when present, keeping re-runs and partially applied upgrades safe.
+
+## Dec 18 2025 · Dev baseline squash & automation
+- Deleted the legacy 001/002/003 revisions and rebuilt a single `001_initial_squashed` migration that creates the enums, pgvector/btree_gist extensions, tenant/message/usage/appointment tables, and the vacation-wizard exclusions in one deterministic step.
+- Imported the ORM models inside `alembic/env.py` so autogenerate sees every table, keeping future migrations aligned with `Base.metadata` without touching runtime code.
+- Added a GitHub Actions workflow that installs API dependencies and runs `alembic -c api/alembic.ini upgrade head` against the DEV database via `secrets.DEV_DATABASE_URL`, ensuring the reset baseline is applied automatically on every push to `dev` or manual dispatch.

@@ -45,9 +45,15 @@ Optional knobs:
 
 Use `scripts/smoke_redis.sh http://localhost:8000` to verify `/healthz` reports Redis as healthy after deployment.
 
-### 🐳 Local Docker run  
+### 🐳 Local Docker run
 ```bash
-docker compose up --build api       # first build caches deps layer  
+docker compose up --build api       # first build caches deps layer
 docker compose up api               # subsequent runs are fast
-```  
+```
 The multi-stage Dockerfile installs Python deps once (layer cache) and copies source separately, so code-only edits rebuild in seconds.
+
+## Dev baseline reset
+
+- The shared dev database was reset and now boots from the squashed Alembic baseline `001_initial_squashed`.
+- To recreate the schema locally, export `DATABASE_URL` with the dev connection string and run `alembic -c api/alembic.ini upgrade head`.
+- For any future schema change, add a brand-new Alembic revision—never edit or replace `001_initial_squashed`.
