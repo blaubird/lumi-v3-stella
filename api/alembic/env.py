@@ -8,11 +8,14 @@ import sys
 
 from alembic import context
 
-# Add parent directory to path so we can import models
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# Add parent directory to path so we can import project modules.
+base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if base_dir not in sys.path:
+    sys.path.append(base_dir)
 
-# Import Base from models
+# Import metadata and models so Alembic sees every table definition.
 from database import Base
+import models  # noqa: F401  # Imported for side-effects so metadata is populated.
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
